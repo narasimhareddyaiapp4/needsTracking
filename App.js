@@ -44,7 +44,7 @@ import {
   TouchableOpacity,
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
-import { registerRootComponent } from 'expo';
+
 
 // React Navigation imports
 import { NavigationContainer, useNavigationContainerRef, DefaultTheme, DarkTheme } from '@react-navigation/native';
@@ -702,4 +702,3 @@ const styles = StyleSheet.create({
   },
 });
 
-registerRootComponent(App);
