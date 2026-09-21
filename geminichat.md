@@ -157,3 +157,21 @@
      - Adds `seller_id`, `table_no`, and `order_type` columns to `orders`.
      - Configures RLS policies (`orders_insert_policy`, `orders_select_policy`, `order_items_insert_policy`) allowing guest customers (`auth.uid() IS NULL`) to insert Dine-in orders and store sellers to view and manage all orders placed at their store.
   5. **Production Build**: Verified zero missing styles, validated Babel transforms, and completed clean Expo web production export (`dist/`).
+
+## 2026-09-21 07:01:47 UTC
+- **User Request**: "can u check stating page loading loading and side by side seller map dispaying , only signle view required kindly fix this"
+- **Summary**:
+  1. **Fixed Starting Page Double Reload / Loading Loop**:
+     - Diagnosed root cause: `public/index.html` registered a service worker `controllerchange` listener that unconditionally invoked `window.location.reload()`. On every initial page visit or controller claim, the starting page was loaded and immediately reloaded, causing the jarring double "loading loading" experience.
+     - Updated SW registration to check `hadController = !!navigator.serviceWorker.controller;` and only reload on genuine subsequent worker upgrades.
+     - Removed synchronous `reg.update()` inside window `load` listener to prevent continuous reload churn.
+     - Decreased `App.js` fallback safety timeout from 2500ms to 800ms so auth resolution doesn't cause unnecessary spinner wait.
+     - Bumped PWA service worker cache name to `needs-tracker-pwa-v8` in `public/sw.js` and `dist/sw.js` to purge stale cached scripts.
+  2. **Enforced Single-View Map Without Side-by-Side Tile Duplication**:
+     - Configured Leaflet `L.tileLayer` across [SellersMapScreen.js](file:///workspaces/needsTracking/src/screens/SellersMapScreen.js), [LeafletMap.js](file:///workspaces/needsTracking/src/components/LeafletMap.js), [CustomerMapScreen.js](file:///workspaces/needsTracking/src/screens/CustomerMapScreen.js), and [ProductMapScreen.js](file:///workspaces/needsTracking/src/screens/ProductMapScreen.js) with `noWrap: true`, `bounds: worldBounds`, `minZoom: 3`, and `maxBounds: worldBounds` with `maxBoundsViscosity: 1.0` and `worldCopyJump: false`.
+     - This strictly prevents Leaflet from repeating the world tiles and markers horizontally across the screen on desktop, tablet, and widescreen views.
+  3. **Removed Unwanted Startup Modal Popup**:
+     - Removed automatic `setSelectedSeller(firstActive)` and `setSelectedSeller(sorted[0])` in [SellersMapScreen.js](file:///workspaces/needsTracking/src/screens/SellersMapScreen.js) so the initial starting page cleanly displays the full interactive map with seller pins instead of popping up an unprompted modal card over the map.
+  4. **Fresh Production Web Export**:
+     - Generated fresh Expo web bundle (`dist/`), prepared GitHub Pages assets (`.nojekyll`, `404.html`), and verified clean build.
+

@@ -135,13 +135,25 @@ const SimpleLeafletMap = forwardRef(({
       try {
         if (map) return;
 
+        var southWest = L.latLng(-85, -180);
+        var northEast = L.latLng(85, 180);
+        var worldBounds = L.latLngBounds(southWest, northEast);
+
         map = L.map('map', {
           zoomControl: true,
-          attributionControl: true
+          attributionControl: true,
+          minZoom: 3,
+          maxZoom: 19,
+          maxBounds: worldBounds,
+          maxBoundsViscosity: 1.0,
+          worldCopyJump: false
         });
         
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
           maxZoom: 19,
+          minZoom: 3,
+          noWrap: true,
+          bounds: worldBounds,
           attribution: '© OpenStreetMap contributors'
         }).addTo(map);
 

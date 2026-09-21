@@ -552,19 +552,20 @@ export default function SellersMapScreen({ route }) {
       if (fetchedSellers && fetchedSellers.length > 0) {
         const targetId = route?.params?.selectedSellerId || route?.params?.sellerId;
         const targetSeller = targetId ? fetchedSellers.find((s) => String(s.id) === String(targetId)) : null;
-        const firstActive = targetSeller || fetchedSellers.find((s) => s.is_store_active !== false || s.is_map_active !== false || (s.productCount && s.productCount > 0)) || fetchedSellers[0];
-        setSelectedSeller(firstActive);
-        if (targetSeller && targetSeller.latitude && targetSeller.longitude) {
-          sendMapMessage({
-            type: "SET_VIEW",
-            latitude: targetSeller.latitude,
-            longitude: targetSeller.longitude,
-            zoom: 16,
-          });
-          sendMapMessage({
-            type: "OPEN_SELLER",
-            sellerId: targetSeller.id,
-          });
+        if (targetSeller) {
+          setSelectedSeller(targetSeller);
+          if (targetSeller.latitude && targetSeller.longitude) {
+            sendMapMessage({
+              type: "SET_VIEW",
+              latitude: targetSeller.latitude,
+              longitude: targetSeller.longitude,
+              zoom: 16,
+            });
+            sendMapMessage({
+              type: "OPEN_SELLER",
+              sellerId: targetSeller.id,
+            });
+          }
         }
       }
 
@@ -581,8 +582,8 @@ export default function SellersMapScreen({ route }) {
           if (sorted.length > 0) {
             const targetId = route?.params?.selectedSellerId || route?.params?.sellerId;
             const targetSeller = targetId ? sorted.find((s) => String(s.id) === String(targetId)) : null;
-            if (!targetSeller) {
-              setSelectedSeller(sorted[0]);
+            if (targetSeller) {
+              setSelectedSeller(targetSeller);
             }
           }
           sendMapMessage({
@@ -1192,13 +1193,27 @@ export default function SellersMapScreen({ route }) {
         <div id="mapid"></div>
         <script>
             try {
-                var map = L.map('mapid', { zoomControl: false }).setView([${initialLat}, ${initialLon}], ${initialZoom});
+                var southWest = L.latLng(-85, -180);
+                var northEast = L.latLng(85, 180);
+                var worldBounds = L.latLngBounds(southWest, northEast);
+
+                var map = L.map('mapid', {
+                    zoomControl: false,
+                    minZoom: 3,
+                    maxZoom: 19,
+                    maxBounds: worldBounds,
+                    maxBoundsViscosity: 1.0,
+                    worldCopyJump: false
+                }).setView([${initialLat}, ${initialLon}], ${initialZoom});
                 L.control.zoom({ position: 'bottomright' }).addTo(map);
 
-                // Reliable standard OpenStreetMap tile layer
+                // Reliable standard OpenStreetMap tile layer with noWrap to enforce single view without side-by-side tile duplicates
                 L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
                     attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
-                    maxZoom: 19
+                    maxZoom: 19,
+                    minZoom: 3,
+                    noWrap: true,
+                    bounds: worldBounds
                 }).addTo(map);
 
                 window.map = map;

@@ -74,24 +74,26 @@
     <!-- Security: Automatically upgrade any insecure http:// requests to https:// -->
     <meta http-equiv="Content-Security-Policy" content="upgrade-insecure-requests" />
 
-    <!-- PWA Service Worker Registration with Auto-Reload on New Version -->
+    <!-- PWA Service Worker Registration with Safe Upgrade Reload -->
     <script>
       if ('serviceWorker' in navigator) {
+        var hadController = !!navigator.serviceWorker.controller;
         var isReloading = false;
         navigator.serviceWorker.addEventListener('controllerchange', function() {
-          if (!isReloading) {
+          // Only reload if the page was ALREADY controlled by an older service worker
+          // NEVER reload on the very first visit or initial controller claim!
+          if (hadController && !isReloading) {
             isReloading = true;
-            console.log('[PWA] New service worker active, reloading to apply latest updates...');
+            console.log('[PWA] Service worker updated, reloading to apply latest updates...');
             window.location.reload();
           }
         });
 
         window.addEventListener('load', function() {
-          var swUrl = './sw.js?v=7';
+          var swUrl = './sw.js?v=8';
           navigator.serviceWorker.register(swUrl)
             .then(function(reg) {
               console.log('[PWA] Service Worker registered with scope:', reg.scope);
-              reg.update();
             })
             .catch(function(err) {
               console.warn('[PWA] Service Worker registration notice:', err);

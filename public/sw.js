@@ -1,5 +1,5 @@
 /* Needs Tracker PWA Service Worker */
-const CACHE_NAME = 'needs-tracker-pwa-v7';
+const CACHE_NAME = 'needs-tracker-pwa-v8';
 
 const STATIC_ASSETS = [
   './',

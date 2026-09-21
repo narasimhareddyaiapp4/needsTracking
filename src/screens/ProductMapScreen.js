@@ -87,10 +87,24 @@ export default function ProductMapScreen({ route }) {
     <body>
         <div id="mapid"></div>
         <script>
-            var map = L.map('mapid').setView([20.5937, 78.9629], 5);
+            var southWest = L.latLng(-85, -180);
+            var northEast = L.latLng(85, 180);
+            var worldBounds = L.latLngBounds(southWest, northEast);
+
+            var map = L.map('mapid', {
+                minZoom: 3,
+                maxZoom: 19,
+                maxBounds: worldBounds,
+                maxBoundsViscosity: 1.0,
+                worldCopyJump: false
+            }).setView([20.5937, 78.9629], 5);
 
             L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-                attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+                attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+                maxZoom: 19,
+                minZoom: 3,
+                noWrap: true,
+                bounds: worldBounds
             }).addTo(map);
 
             var productLocations = ${JSON.stringify(productLocations)};
