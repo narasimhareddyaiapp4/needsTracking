@@ -795,6 +795,7 @@ const OrderListScreen = ({ navigation, route }) => {
             <Icon name="sign-in" size={18} color="#FFFFFF" style={{ marginRight: 8 }} />
             <Text style={styles.signInButtonText}>Sign In / Sign Up</Text>
           </TouchableOpacity>
+        </View>
       ) : (
         <>
           {/* Segmented Top Toggle between Orders and Sales Report (for Sellers & Admins) */}
