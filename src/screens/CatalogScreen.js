@@ -46,6 +46,8 @@ import {
 import { showAlert } from '../utils/alertUtils';
 import StoreNavigationFooter from '../components/StoreNavigationFooter';
 import StoreQrModal from '../components/StoreQrModal';
+import SellerContactShareModal from '../components/SellerContactShareModal';
+import { batchFetchSellerContacts } from '../services/sellerContactService';
 
 const { width } = Dimensions.get('window');
 const SUBCAT_VIEW_MODE_KEY = '@catalog_subcat_view_mode';
@@ -228,9 +230,20 @@ const CatalogScreen = ({ navigation, route }) => {
   const [viewerInitialIndex, setViewerInitialIndex] = useState(0);
   const [viewerTitle, setViewerTitle] = useState('');
   const [updatingCart, setUpdatingCart] = useState(false);
-  const [variantSearch, setVariantSearch] = useState({});
   const [isProductModalVisible, setIsProductModalVisible] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState(null);
+  const [shareModalVisible, setShareModalVisible] = useState(false);
+  const [shareProduct, setShareProduct] = useState(null);
+
+  const openShareModal = useCallback((prod) => {
+    setShareProduct(prod);
+    setShareModalVisible(true);
+  }, []);
+
+  const closeShareModal = useCallback(() => {
+    setShareModalVisible(false);
+    setShareProduct(null);
+  }, []);
   const [selectedVariants, setSelectedVariants] = useState({});
   const [selectedVariantFilter, setSelectedVariantFilter] = useState(null);
 
@@ -635,6 +648,15 @@ const CatalogScreen = ({ navigation, route }) => {
 
           if (!isMounted) return;
           setProducts(data || []);
+
+          // Pre-fetch seller contacts for instantaneous 0ms response when user taps Share
+          try {
+            const sellerIdsToFetch = (data || []).map(p => p.user_id || p.customer_id).filter(Boolean);
+            if (targetSellerId) sellerIdsToFetch.push(targetSellerId);
+            if (sellerIdsToFetch.length > 0) {
+              batchFetchSellerContacts(sellerIdsToFetch).catch(() => {});
+            }
+          } catch (_) {}
 
           if (currentUser) {
             const cartData = await getCart(currentUser.id);
@@ -1113,22 +1135,36 @@ const CatalogScreen = ({ navigation, route }) => {
             )}
           </TouchableOpacity>
 
-          {/* Favorite Heart Button */}
-          <TouchableOpacity
-            style={[styles.cardFavoriteBtn, isFav && styles.cardFavoriteBtnActive]}
-            onPress={(e) => {
-              e?.stopPropagation?.();
-              handleToggleFavorite(item.id);
-            }}
-            activeOpacity={0.7}
-            accessibilityLabel={isFav ? "Remove from favorites" : "Add to favorites"}
-          >
-            <Icon
-              name={isFav ? "heart" : "heart-o"}
-              size={15}
-              color={isFav ? "#EF4444" : "#64748B"}
-            />
-          </TouchableOpacity>
+          {/* Top action buttons: Share (Highlight Mode) & Favorite */}
+          <View style={styles.cardTopActions}>
+            <TouchableOpacity
+              style={[styles.cardShareBtn, styles.cardShareBtnHighlight]}
+              onPress={(e) => {
+                e?.stopPropagation?.();
+                openShareModal(item);
+              }}
+              activeOpacity={0.75}
+              accessibilityLabel="Share product & contact seller"
+            >
+              <Icon name="share-alt" size={13} color="#0284C7" />
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.cardFavoriteBtn, isFav && styles.cardFavoriteBtnActive]}
+              onPress={(e) => {
+                e?.stopPropagation?.();
+                handleToggleFavorite(item.id);
+              }}
+              activeOpacity={0.7}
+              accessibilityLabel={isFav ? "Remove from favorites" : "Add to favorites"}
+            >
+              <Icon
+                name={isFav ? "heart" : "heart-o"}
+                size={15}
+                color={isFav ? "#EF4444" : "#64748B"}
+              />
+            </TouchableOpacity>
+          </View>
 
           {imageUrl && (
             <TouchableOpacity
@@ -2168,6 +2204,16 @@ const CatalogScreen = ({ navigation, route }) => {
                 </View>
 
                 <View style={styles.modalHeaderRightActions}>
+                  {/* Share & Contact Seller Button beside Favorite */}
+                  <TouchableOpacity
+                    style={[styles.modalHeaderShareBtn, styles.modalHeaderShareBtnHighlight]}
+                    onPress={() => openShareModal(selectedProduct)}
+                    activeOpacity={0.8}
+                    accessibilityLabel="Share product & contact seller"
+                  >
+                    <Icon name="share-alt" size={16} color="#0284C7" />
+                  </TouchableOpacity>
+
                   <TouchableOpacity
                     style={[
                       styles.modalHeaderFavBtn,
@@ -2562,7 +2608,23 @@ const CatalogScreen = ({ navigation, route }) => {
               handleToggleFavorite(prodId);
             }
           }}
+          onShare={(target) => {
+            const prodId = (typeof target === 'object' && target) ? (target.productId || target.id) : target;
+            const prod = products.find(p => String(p.id) === String(prodId)) || shareProduct || selectedProduct;
+            if (prod) {
+              openShareModal(prod);
+            }
+          }}
           favoriteProductIds={favoriteProductIds}
+        />
+
+        {/* Seller Direct Contact & Share Modal with Highlight Mode */}
+        <SellerContactShareModal
+          visible={shareModalVisible}
+          onClose={closeShareModal}
+          product={shareProduct}
+          sellerId={shareProduct?.user_id || shareProduct?.customer_id || activeSellerId}
+          storeName={activeStoreName || ''}
         />
 
         {/* Individual Store QR Code Modal */}
@@ -3029,6 +3091,19 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
+  },
+  modalHeaderShareBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#F1F5F9',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modalHeaderShareBtnHighlight: {
+    backgroundColor: '#F0F9FF',
+    borderWidth: 1.5,
+    borderColor: '#38BDF8',
   },
   modalHeaderFavBtn: {
     width: 36,
@@ -3824,17 +3899,42 @@ const styles = StyleSheet.create({
     marginRight: 0,
     marginBottom: 4,
   },
-  cardFavoriteBtn: {
+  cardTopActions: {
     position: 'absolute',
     top: 8,
     right: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    zIndex: 3,
+  },
+  cardShareBtn: {
+    backgroundColor: 'rgba(255, 255, 255, 0.94)',
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.15,
+    shadowRadius: 2,
+    elevation: 3,
+  },
+  cardShareBtnHighlight: {
+    backgroundColor: '#F0F9FF',
+    borderWidth: 1.5,
+    borderColor: '#38BDF8',
+    shadowColor: '#0284C7',
+    shadowOpacity: 0.25,
+  },
+  cardFavoriteBtn: {
     backgroundColor: 'rgba(255, 255, 255, 0.92)',
     width: 30,
     height: 30,
     borderRadius: 15,
     justifyContent: 'center',
     alignItems: 'center',
-    zIndex: 3,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.15,

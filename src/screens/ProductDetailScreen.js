@@ -15,6 +15,7 @@ import {
 import { Video } from 'expo-av';
 import Swiper from 'react-native-swiper';
 import FullScreenImageViewer from '../components/FullScreenImageViewer';
+import SellerContactShareModal from '../components/SellerContactShareModal';
 import { addToCart, supabase } from '../services/supabase';
 import { getFavoriteProductIds, toggleFavoriteProductId } from '../services/localStorageService';
 
@@ -37,6 +38,7 @@ const ProductDetailScreen = ({ navigation, route }) => {
   const [quantity, setQuantity] = useState(1);
   const [user, setUser] = useState(null);
   const [isModalVisible, setIsModalVisible] = useState(false);
+  const [shareModalVisible, setShareModalVisible] = useState(false);
   const [initialMediaIndex, setInitialMediaIndex] = useState(0);
   const [otherProducts, setOtherProducts] = useState(route?.params?.allProducts || []);
   const [isFav, setIsFav] = useState(false);
@@ -274,7 +276,7 @@ const ProductDetailScreen = ({ navigation, route }) => {
 
   return (
     <View style={{ flex: 1, backgroundColor: '#fff' }}>
-      {/* Top Floating Action Bar with Back and Favorite */}
+      {/* Top Floating Action Bar with Back, Share (Highlight Mode), and Favorite */}
       <View style={styles.topFloatingBar}>
         <TouchableOpacity
           style={styles.floatingCircleBtn}
@@ -283,13 +285,26 @@ const ProductDetailScreen = ({ navigation, route }) => {
         >
           <Icon name="arrow-left" size={17} color="#1E293B" />
         </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.floatingCircleBtn, isFav && styles.floatingCircleBtnFavActive]}
-          onPress={handleToggleFav}
-          accessibilityLabel={isFav ? 'Remove from favorites' : 'Add to favorites'}
-        >
-          <Icon name={isFav ? 'heart' : 'heart-o'} size={17} color={isFav ? '#EF4444' : '#1E293B'} />
-        </TouchableOpacity>
+
+        <View style={styles.topRightActions}>
+          {/* Share & Contact Seller Button beside Favorite */}
+          <TouchableOpacity
+            style={[styles.floatingCircleBtn, styles.floatingCircleBtnShareHighlight]}
+            onPress={() => setShareModalVisible(true)}
+            activeOpacity={0.75}
+            accessibilityLabel="Share product & contact seller"
+          >
+            <Icon name="share-alt" size={16} color="#0284C7" />
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.floatingCircleBtn, isFav && styles.floatingCircleBtnFavActive]}
+            onPress={handleToggleFav}
+            accessibilityLabel={isFav ? 'Remove from favorites' : 'Add to favorites'}
+          >
+            <Icon name={isFav ? 'heart' : 'heart-o'} size={17} color={isFav ? '#EF4444' : '#1E293B'} />
+          </TouchableOpacity>
+        </View>
       </View>
 
       <ScrollView style={styles.container}>
@@ -429,8 +444,18 @@ const ProductDetailScreen = ({ navigation, route }) => {
           const tId = typeof target === 'object' ? (target.productId || target.id) : target;
           handleToggleFav(tId || product?.id);
         }}
+        onShare={() => setShareModalVisible(true)}
         favoriteProductIds={favoriteProductIds}
         isFavorite={isFav}
+      />
+
+      {/* Seller Contact & Share Modal with Highlight Mode */}
+      <SellerContactShareModal
+        visible={shareModalVisible}
+        onClose={() => setShareModalVisible(false)}
+        product={product}
+        sellerId={product?.user_id || product?.customer_id || route?.params?.sellerId}
+        storeName={route?.params?.sellerName || ''}
       />
     </ScrollView>
   </View>
@@ -631,6 +656,18 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.18,
     shadowRadius: 3,
     elevation: 4,
+  },
+  topRightActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  floatingCircleBtnShareHighlight: {
+    backgroundColor: '#F0F9FF',
+    borderWidth: 1.5,
+    borderColor: '#38BDF8',
+    shadowColor: '#0284C7',
+    shadowOpacity: 0.25,
   },
   floatingCircleBtnFavActive: {
     backgroundColor: '#FFF1F2',

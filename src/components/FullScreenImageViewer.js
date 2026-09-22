@@ -43,6 +43,7 @@ const FullScreenImageViewer = ({
   onClose,
   title,
   onToggleFavorite,
+  onShare,
   favoriteProductIds = [],
   isFavorite,
 }) => {
@@ -445,6 +446,21 @@ const FullScreenImageViewer = ({
             </View>
 
             <View style={styles.headerActions}>
+              {/* Share & Contact Seller Button beside Favorite */}
+              {onShare ? (
+                <TouchableOpacity
+                  style={[styles.actionButton, styles.shareHighlightButton]}
+                  onPress={() => {
+                    const target = currentProductId || currentMedia?.productId || currentMedia;
+                    onShare(target, currentIndex);
+                  }}
+                  activeOpacity={0.75}
+                  accessibilityLabel="Share product & contact seller"
+                >
+                  <Icon name="share-alt" size={15} color="#38BDF8" />
+                </TouchableOpacity>
+              ) : null}
+
               {/* Favorite Button (when onToggleFavorite is provided) */}
               {onToggleFavorite ? (
                 <TouchableOpacity
@@ -742,6 +758,18 @@ const styles = StyleSheet.create({
     height: 38,
     borderRadius: 19,
     backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    ...(Platform.OS === 'web' ? { cursor: 'pointer' } : {}),
+  },
+  shareHighlightButton: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    paddingHorizontal: 0,
+    backgroundColor: 'rgba(2, 132, 199, 0.3)',
+    borderWidth: 1.5,
+    borderColor: '#38BDF8',
     justifyContent: 'center',
     alignItems: 'center',
     ...(Platform.OS === 'web' ? { cursor: 'pointer' } : {}),

@@ -141,6 +141,9 @@ const UpiQrScreen = ({ navigation, route }) => {
   const dynamicUpiUri = `upi://pay?pa=${encodeURIComponent(activeVpa)}&pn=${encodeURIComponent(payeeName)}&am=${Number(amount).toFixed(2)}&cu=INR&tn=${encodeURIComponent('Bill Order ' + orderRef)}`;
   const dynamicQrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&margin=8&data=${encodeURIComponent(dynamicUpiUri)}`;
 
+  const displayedQrUrl =
+    qrTab === 'profile' && activeQrImageUrl ? activeQrImageUrl : dynamicQrImageUrl;
+
   const openQrImageViewer = () => {
     const list = [];
     if (dynamicQrImageUrl) {
@@ -282,7 +285,9 @@ const UpiQrScreen = ({ navigation, route }) => {
         <View style={styles.amountPill}>
           <View>
             <Text style={styles.amountPillLabel}>Bill Amount to Pay:</Text>
-            <Text style={styles.amountPillSub}>Auto-filled in QR code</Text>
+            <Text style={styles.amountPillSub}>
+              {Platform.OS === 'web' ? 'Scan QR or copy UPI ID below' : 'Auto-filled in QR code'}
+            </Text>
           </View>
           <Text style={styles.amountPillValue}>₹{Number(amount).toFixed(2)}</Text>
         </View>
@@ -339,10 +344,7 @@ const UpiQrScreen = ({ navigation, route }) => {
               >
                 <Image
                   source={{
-                    uri:
-                      qrTab === 'profile' && activeQrImageUrl
-                        ? activeQrImageUrl
-                        : dynamicQrImageUrl,
+                    uri: displayedQrUrl,
                   }}
                   style={styles.qrImage}
                   resizeMode="contain"
@@ -362,17 +364,19 @@ const UpiQrScreen = ({ navigation, route }) => {
             : `✨ Amount ₹${Number(amount).toFixed(2)} is automatically pre-filled when scanned with any UPI app!`}
         </Text>
 
-        {/* Direct 1-Tap Pay via UPI App */}
-        <TouchableOpacity
-          style={styles.directUpiPayButton}
-          onPress={handleDirectUpiPay}
-          activeOpacity={0.85}
-        >
-          <Icon name="mobile-phone" size={20} color="#FFFFFF" style={{ marginRight: 8 }} />
-          <Text style={styles.directUpiPayButtonText}>
-            Pay ₹{Number(amount).toFixed(2)} in UPI App
-          </Text>
-        </TouchableOpacity>
+        {/* Direct 1-Tap Pay via UPI App - Mobile only */}
+        {Platform.OS !== 'web' && (
+          <TouchableOpacity
+            style={styles.directUpiPayButton}
+            onPress={handleDirectUpiPay}
+            activeOpacity={0.85}
+          >
+            <Icon name="mobile-phone" size={20} color="#FFFFFF" style={{ marginRight: 8 }} />
+            <Text style={styles.directUpiPayButtonText}>
+              Pay ₹{Number(amount).toFixed(2)} in UPI App
+            </Text>
+          </TouchableOpacity>
+        )}
 
         {/* UPI ID Row with 1-Tap Copy */}
         <View style={styles.upiIdRow}>

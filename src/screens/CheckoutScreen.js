@@ -545,6 +545,15 @@ const CheckoutScreen = ({ navigation, route }) => {
       })
     : '';
 
+  // Static UPI URI without amount/tr parameters (works reliably across all UPI apps on Web and Mobile)
+  const staticUpiUri = activeUpiId
+    ? buildUpiPaymentUri({
+        upiId: activeUpiId,
+        payeeName,
+        rawText: sellerRawUpiText,
+      })
+    : '';
+
   // Local instant high-resolution QR code generator (no external API delay)
   useEffect(() => {
     let isMounted = true;
@@ -1470,15 +1479,6 @@ const CheckoutScreen = ({ navigation, route }) => {
 
   const openQrImageViewer = () => {
     const list = [];
-    if (profileQrImageUrl) {
-      list.push({
-        id: 'checkout-profile-qr',
-        uri: profileQrImageUrl,
-        type: 'image',
-        title: `Seller Profile QR Code - ${resolvedSellerName || 'Store'}`,
-        subtitle: `UPI ID: ${activeUpiId || 'Store QR'}`,
-      });
-    }
     const activeDynamicUrl = dynamicQrDataUrl || fallbackDynamicQrUrl;
     if (activeDynamicUrl) {
       list.push({
@@ -1487,6 +1487,15 @@ const CheckoutScreen = ({ navigation, route }) => {
         type: 'image',
         title: `Dynamic UPI QR Code (₹${totalAmount.toFixed(2)})`,
         subtitle: `Scan to pay ₹${totalAmount.toFixed(2)} to ${resolvedSellerName || 'Store'}`,
+      });
+    }
+    if (profileQrImageUrl) {
+      list.push({
+        id: 'checkout-profile-qr',
+        uri: profileQrImageUrl,
+        type: 'image',
+        title: `Seller Store Standee QR Code - ${resolvedSellerName || 'Store'}`,
+        subtitle: `UPI ID: ${activeUpiId || 'Store QR'}`,
       });
     }
     (cartItems || []).forEach((ci) => {
@@ -2061,7 +2070,11 @@ const CheckoutScreen = ({ navigation, route }) => {
             <View style={styles.upiAmountPill}>
               <View>
                 <Text style={styles.upiAmountLabel}>Order Bill Amount:</Text>
-                <Text style={styles.upiAmountSub}>Scan Profile QR or tap 'Pay in UPI App' below</Text>
+                <Text style={styles.upiAmountSub}>
+                  {Platform.OS === 'web'
+                    ? "Scan Dynamic Bill QR or copy UPI ID below"
+                    : "Scan Profile QR or tap 'Pay in UPI App' below"}
+                </Text>
               </View>
               <Text style={styles.upiAmountValue}>₹{totalAmount.toFixed(2)}</Text>
             </View>
@@ -2150,78 +2163,82 @@ const CheckoutScreen = ({ navigation, route }) => {
                 : `Scan with Google Pay, PhonePe, Paytm or any UPI app. Bill amount (₹${totalAmount.toFixed(2)}) and payee are pre-filled automatically!`}
             </Text>
 
-            {/* Direct 1-Tap UPI Apps & Intent Links */}
-            <View style={styles.upiAppsSection}>
-              <View style={styles.upiAppsSectionHeader}>
-                <Text style={styles.upiAppsSectionTitle}>🚀 Instant 1-Tap Pay via UPI App</Text>
-                <Text style={styles.upiAppsSectionSub}>Tap your app to pay ₹{totalAmount.toFixed(2)} with pre-filled bill total</Text>
-              </View>
+            {/* Direct 1-Tap UPI Apps & Intent Links - Disabled on Web */}
+            {Platform.OS !== 'web' && (
+              <View style={styles.upiAppsSection}>
+                <View style={styles.upiAppsSectionHeader}>
+                  <Text style={styles.upiAppsSectionTitle}>🚀 Instant 1-Tap Pay via UPI App</Text>
+                  <Text style={styles.upiAppsSectionSub}>Tap your app to pay ₹{totalAmount.toFixed(2)} with pre-filled bill total</Text>
+                </View>
 
-              <View style={styles.upiAppsGrid}>
-                {upiAppList
-                  .filter((a) => a.id !== 'any')
-                  .map((app) => {
-                    const webHref = getAppWebHref(app);
-                    return (
-                      <TouchableOpacity
-                        key={app.id}
-                        style={[
-                          styles.upiAppCard,
-                          { borderColor: app.borderColor, backgroundColor: app.bgColor },
-                        ]}
-                        onPress={() => handleOpenDirectUpiPay(app.id)}
-                        accessibilityRole={Platform.OS === 'web' && webHref ? 'link' : 'button'}
-                        href={webHref}
-                        target="_top"
-                        rel="noopener noreferrer"
-                        activeOpacity={0.8}
-                      >
-                        <View style={[styles.upiAppIconCircle, { backgroundColor: '#FFFFFF' }]}>
-                          <Icon name={app.icon} size={15} color={app.color} />
-                        </View>
-                        <View style={styles.upiAppTextCol}>
-                          <Text style={[styles.upiAppName, { color: app.color }]}>{app.name}</Text>
-                          <Text style={styles.upiAppActionText}>Pay ₹{totalAmount.toFixed(2)}</Text>
-                        </View>
-                        <Icon name="chevron-right" size={11} color={app.color} style={{ opacity: 0.6 }} />
-                      </TouchableOpacity>
-                    );
-                  })}
-              </View>
+                <View style={styles.upiAppsGrid}>
+                  {upiAppList
+                    .filter((a) => a.id !== 'any')
+                    .map((app) => {
+                      const webHref = getAppWebHref(app);
+                      return (
+                        <TouchableOpacity
+                          key={app.id}
+                          style={[
+                            styles.upiAppCard,
+                            { borderColor: app.borderColor, backgroundColor: app.bgColor },
+                          ]}
+                          onPress={() => handleOpenDirectUpiPay(app.id)}
+                          accessibilityRole={Platform.OS === 'web' && webHref ? 'link' : 'button'}
+                          href={webHref}
+                          target="_top"
+                          rel="noopener noreferrer"
+                          activeOpacity={0.8}
+                        >
+                          <View style={[styles.upiAppIconCircle, { backgroundColor: '#FFFFFF' }]}>
+                            <Icon name={app.icon} size={15} color={app.color} />
+                          </View>
+                          <View style={styles.upiAppTextCol}>
+                            <Text style={[styles.upiAppName, { color: app.color }]}>{app.name}</Text>
+                            <Text style={styles.upiAppActionText}>Pay ₹{totalAmount.toFixed(2)}</Text>
+                          </View>
+                          <Icon name="chevron-right" size={11} color={app.color} style={{ opacity: 0.6 }} />
+                        </TouchableOpacity>
+                      );
+                    })}
+                </View>
 
-              {/* All Apps / System Chooser Intent Button */}
-              {(() => {
-                const anyApp = upiAppList.find((a) => a.id === 'any') || upiAppList[0];
-                const anyHref = anyApp ? getAppWebHref(anyApp) : undefined;
-                return (
-                  <TouchableOpacity
-                    style={styles.directUpiPayButton}
-                    onPress={() => handleOpenDirectUpiPay('any')}
-                    accessibilityRole={Platform.OS === 'web' && anyHref ? 'link' : 'button'}
-                    href={anyHref}
-                    target="_top"
-                    rel="noopener noreferrer"
-                    activeOpacity={0.85}
-                  >
-                    <Icon name="mobile-phone" size={20} color="#FFFFFF" style={{ marginRight: 8 }} />
-                    <Text style={styles.directUpiPayButtonText}>
-                      Pay ₹{totalAmount.toFixed(2)} in Any UPI App
-                    </Text>
-                  </TouchableOpacity>
-                );
-              })()}
-            </View>
-
-            {/* Google Pay / UPI Security Guidance */}
-            <View style={styles.upiSecurityTipCard}>
-              <Icon name="shield" size={15} color="#0D9488" style={{ marginTop: 2, marginRight: 8 }} />
-              <View style={{ flex: 1 }}>
-                <Text style={styles.upiSecurityTipTitle}>Smooth UPI Checkout Tip</Text>
-                <Text style={styles.upiSecurityTipText}>
-                  If Google Pay displays a &quot;Transaction may be risky&quot; warning when tapping a link to an individual seller, simply scan the QR code above with your Google Pay camera, or choose PhonePe / Paytm / Any UPI App for 1-tap payment!
-                </Text>
+                {/* All Apps / System Chooser Intent Button */}
+                {(() => {
+                  const anyApp = upiAppList.find((a) => a.id === 'any') || upiAppList[0];
+                  const anyHref = anyApp ? getAppWebHref(anyApp) : undefined;
+                  return (
+                    <TouchableOpacity
+                      style={styles.directUpiPayButton}
+                      onPress={() => handleOpenDirectUpiPay('any')}
+                      accessibilityRole={Platform.OS === 'web' && anyHref ? 'link' : 'button'}
+                      href={anyHref}
+                      target="_top"
+                      rel="noopener noreferrer"
+                      activeOpacity={0.85}
+                    >
+                      <Icon name="mobile-phone" size={20} color="#FFFFFF" style={{ marginRight: 8 }} />
+                      <Text style={styles.directUpiPayButtonText}>
+                        Pay ₹{totalAmount.toFixed(2)} in Any UPI App
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })()}
               </View>
-            </View>
+            )}
+
+            {/* Google Pay / UPI Security Guidance - Disabled on Web */}
+            {Platform.OS !== 'web' && (
+              <View style={styles.upiSecurityTipCard}>
+                <Icon name="shield" size={15} color="#0D9488" style={{ marginTop: 2, marginRight: 8 }} />
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.upiSecurityTipTitle}>Smooth UPI Checkout Tip</Text>
+                  <Text style={styles.upiSecurityTipText}>
+                    If Google Pay displays a &quot;Transaction may be risky&quot; warning when tapping a link to an individual seller, simply scan the QR code above with your Google Pay camera, or choose PhonePe / Paytm / Any UPI App for 1-tap payment!
+                  </Text>
+                </View>
+              </View>
+            )}
 
             {/* Payee UPI ID & 1-Tap Copy */}
             <View style={styles.upiIdRow}>
