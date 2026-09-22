@@ -2000,6 +2000,31 @@ const ProfileScreen = ({ navigation, route }) => {
               <Text style={styles.storeQuickBtnTextInactive}>Deactivate All</Text>
             </TouchableOpacity>
           </View>
+
+          {/* Quick shortcut to Sales & Hourly Analytics */}
+          <TouchableOpacity
+            style={styles.salesReportProfileBtn}
+            activeOpacity={0.8}
+            onPress={() => {
+              navigation.navigate('SellerSalesReport', {
+                sellerId: user?.id,
+                sellerName: profile?.business_name || profile?.full_name,
+              });
+            }}
+          >
+            <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
+              <View style={styles.salesReportProfileIcon}>
+                <Icon name="bar-chart" size={16} color="#4F46E5" />
+              </View>
+              <View style={{ marginLeft: 10, flex: 1 }}>
+                <Text style={styles.salesReportProfileTitle}>Sales & Hourly Analytics Report</Text>
+                <Text style={styles.salesReportProfileSub}>
+                  Hourly rush spikes, product contribution & custom date ranges
+                </Text>
+              </View>
+            </View>
+            <Icon name="chevron-right" size={14} color="#94A3B8" />
+          </TouchableOpacity>
         </View>
       )}
 
@@ -4746,6 +4771,41 @@ const styles = StyleSheet.create({
     color: '#166534',
     marginTop: 3,
     lineHeight: 16,
+  },
+  salesReportProfileBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#EEF2FF',
+    borderColor: '#C7D2FE',
+    borderWidth: 1,
+    borderRadius: 12,
+    padding: 12,
+    marginTop: 12,
+  },
+  salesReportProfileIcon: {
+    width: 34,
+    height: 34,
+    borderRadius: 8,
+    backgroundColor: '#FFFFFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#4F46E5',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  salesReportProfileTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#312E81',
+  },
+  salesReportProfileSub: {
+    fontSize: 11,
+    color: '#4338CA',
+    marginTop: 2,
+    lineHeight: 15,
   },
 });
 

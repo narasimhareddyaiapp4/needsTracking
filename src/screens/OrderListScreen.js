@@ -23,6 +23,7 @@ import UniversalDateTimePicker from '../components/UniversalDateTimePicker';
 import { showAlert } from '../utils/alertUtils';
 import { downloadQrCodeImage } from '../utils/qrDownloadUtils';
 import StoreNavigationFooter from '../components/StoreNavigationFooter';
+import SellerSalesReport from '../components/SellerSalesReport';
 import { useCart } from '../context/CartContext';
 import {
   generateQrDataUrl,
@@ -35,6 +36,7 @@ import {
 const OrderListScreen = ({ navigation, route }) => {
   const { sellerId, sellerName, customerId } = route?.params || {};
   const { role: contextRole } = useCart();
+  const [activeMainTab, setActiveMainTab] = useState(route?.params?.initialTab === 'report' ? 'report' : 'orders');
   const [orders, setOrders] = useState([]);
   const [currentUser, setCurrentUser] = useState(null);
   const [userRole, setUserRole] = useState(contextRole || null);
@@ -360,7 +362,10 @@ const OrderListScreen = ({ navigation, route }) => {
     }
 
     if (selectedStatus) {
-      filtered = filtered.filter(order => order.status === selectedStatus);
+      filtered = filtered.filter(order => {
+        const oStatus = (order.status || '').toLowerCase().trim();
+        return oStatus === selectedStatus.toLowerCase().trim();
+      });
     }
 
     if (selectedDate) {
@@ -449,7 +454,16 @@ const OrderListScreen = ({ navigation, route }) => {
           onPress: async () => {
             // Optimistically update in local state for instant UI response
             setOrders(prev =>
-              prev.map(o => (o.id === orderId ? { ...o, payment_status: nextStatus } : o))
+              prev.map(o => {
+                if (o.id === orderId) {
+                  const updated = { ...o, payment_status: nextStatus };
+                  if (nextStatus === 'paid' && (o.status || '').toLowerCase() === 'pending_payment') {
+                    updated.status = 'processing';
+                  }
+                  return updated;
+                }
+                return o;
+              })
             );
             const updated = await updateOrderPaymentStatus(orderId, nextStatus);
             if (!updated) {
@@ -514,6 +528,23 @@ const OrderListScreen = ({ navigation, route }) => {
     });
   };
 
+  const formatOrderStatus = (status) => {
+    if (!status) return 'Pending';
+    const s = String(status).toLowerCase().trim();
+    if (s === 'pending_payment') return 'Payment Pending';
+    if (s === 'out_for_delivery') return 'Out for Delivery';
+    return s.replace(/_/g, ' ').replace(/\b\w/g, (l) => l.toUpperCase());
+  };
+
+  const getOrderStatusColor = (status) => {
+    const s = String(status || '').toLowerCase().trim();
+    if (s === 'pending_payment') return '#D97706';
+    if (s === 'completed' || s === 'delivered') return '#16A34A';
+    if (s === 'cancelled') return '#DC2626';
+    if (s === 'processing' || s === 'shipped' || s === 'out_for_delivery') return '#4F46E5';
+    return '#007AFF';
+  };
+
   const renderOrderItem = ({ item }) => {
     const { orderNumber, dayOrderNo, paymentReference } = extractOrderNumbers(item);
     const isPaymentDone = (item.payment_status === 'paid' || item.status === 'completed' || item.status === 'paid');
@@ -531,7 +562,9 @@ const OrderListScreen = ({ navigation, route }) => {
               <Text style={styles.dayOrderId}>Day Order No: #{dayOrderNo}</Text>
             ) : null}
           </View>
-          <Text style={styles.orderStatus}>Status: {item.status}</Text>
+          <Text style={[styles.orderStatus, { color: getOrderStatusColor(item.status) }]}>
+            Status: {formatOrderStatus(item.status)}
+          </Text>
         </View>
 
         {/* 6-Digit Payment Code & Verification Status Pill */}
@@ -695,6 +728,23 @@ const OrderListScreen = ({ navigation, route }) => {
           )}
         </View>
         <View style={styles.headerActions}>
+          {canManageOrders && (
+            <TouchableOpacity
+              onPress={() => setActiveMainTab((prev) => (prev === 'orders' ? 'report' : 'orders'))}
+              style={[styles.salesReportHeaderBtn, activeMainTab === 'report' && styles.salesReportHeaderBtnActive]}
+              accessibilityLabel="Toggle Sales Report"
+            >
+              <Icon
+                name={activeMainTab === 'report' ? 'list-alt' : 'bar-chart'}
+                size={13}
+                color={activeMainTab === 'report' ? '#FFFFFF' : '#007AFF'}
+                style={{ marginRight: 5 }}
+              />
+              <Text style={[styles.salesReportHeaderBtnText, activeMainTab === 'report' && styles.salesReportHeaderBtnTextActive]}>
+                {activeMainTab === 'report' ? 'Orders' : 'Sales Report'}
+              </Text>
+            </TouchableOpacity>
+          )}
           <TouchableOpacity
             onPress={handleRefresh}
             style={styles.refreshHeaderBtn}
@@ -745,10 +795,53 @@ const OrderListScreen = ({ navigation, route }) => {
             <Icon name="sign-in" size={18} color="#FFFFFF" style={{ marginRight: 8 }} />
             <Text style={styles.signInButtonText}>Sign In / Sign Up</Text>
           </TouchableOpacity>
-        </View>
       ) : (
         <>
-          <View style={styles.searchContainer}>
+          {/* Segmented Top Toggle between Orders and Sales Report (for Sellers & Admins) */}
+          {canManageOrders && (
+            <View style={styles.mainTabSegmentContainer}>
+              <TouchableOpacity
+                style={[styles.mainTabSegment, activeMainTab === 'orders' && styles.mainTabSegmentActive]}
+                onPress={() => setActiveMainTab('orders')}
+                activeOpacity={0.8}
+              >
+                <Icon
+                  name="list-alt"
+                  size={14}
+                  color={activeMainTab === 'orders' ? '#007AFF' : '#64748B'}
+                  style={{ marginRight: 6 }}
+                />
+                <Text style={[styles.mainTabSegmentText, activeMainTab === 'orders' && styles.mainTabSegmentTextActive]}>
+                  Orders ({orders.length})
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.mainTabSegment, activeMainTab === 'report' && styles.mainTabSegmentActive]}
+                onPress={() => setActiveMainTab('report')}
+                activeOpacity={0.8}
+              >
+                <Icon
+                  name="bar-chart"
+                  size={14}
+                  color={activeMainTab === 'report' ? '#007AFF' : '#64748B'}
+                  style={{ marginRight: 6 }}
+                />
+                <Text style={[styles.mainTabSegmentText, activeMainTab === 'report' && styles.mainTabSegmentTextActive]}>
+                  Sales & Hourly Report
+                </Text>
+              </TouchableOpacity>
+            </View>
+          )}
+
+          {canManageOrders && activeMainTab === 'report' ? (
+            <SellerSalesReport
+              sellerId={sellerId || currentUser?.id}
+              sellerName={sellerName}
+            />
+          ) : (
+            <>
+              <View style={styles.searchContainer}>
             <TextInput
               style={styles.searchInput}
               placeholder="Search by Order No, 6-digit Pay Code..."
@@ -757,17 +850,45 @@ const OrderListScreen = ({ navigation, route }) => {
               onChangeText={setSearchQuery}
             />
             <View style={styles.statusFilterContainer}>
-              {['All', 'pending', 'processing', 'shipped', 'delivered', 'completed', 'cancelled'].map(status => (
-                <TouchableOpacity
-                  key={status}
-                  style={[styles.statusButton, selectedStatus === (status === 'All' ? null : status) && styles.selectedStatusButton]}
-                  onPress={() => setSelectedStatus(status === 'All' ? null : status)}
-                >
-                  <Text style={[styles.statusButtonText, selectedStatus === (status === 'All' ? null : status) && styles.selectedStatusButtonText]}>
-                    {status}
-                  </Text>
-                </TouchableOpacity>
-              ))}
+              {[
+                { id: null, label: 'All' },
+                { id: 'pending_payment', label: 'Payment Pending', isPaymentPending: true },
+                { id: 'pending', label: 'Pending' },
+                { id: 'processing', label: 'Processing' },
+                { id: 'shipped', label: 'Shipped' },
+                { id: 'delivered', label: 'Delivered' },
+                { id: 'completed', label: 'Completed' },
+                { id: 'cancelled', label: 'Cancelled' },
+              ].map(tab => {
+                const isSelected = selectedStatus === tab.id;
+                const count = tab.id
+                  ? orders.filter(o => (o.status || '').toLowerCase().trim() === tab.id.toLowerCase().trim()).length
+                  : orders.length;
+
+                return (
+                  <TouchableOpacity
+                    key={tab.id || 'all'}
+                    style={[
+                      styles.statusButton,
+                      isSelected && styles.selectedStatusButton,
+                      tab.isPaymentPending && !isSelected && count > 0 && styles.statusButtonPaymentPendingAlert,
+                    ]}
+                    onPress={() => setSelectedStatus(tab.id)}
+                    activeOpacity={0.75}
+                  >
+                    <Text
+                      style={[
+                        styles.statusButtonText,
+                        isSelected && styles.selectedStatusButtonText,
+                        tab.isPaymentPending && !isSelected && count > 0 && styles.statusButtonTextPaymentPendingAlert,
+                      ]}
+                    >
+                      {tab.label}
+                      {count > 0 ? ` (${count})` : ''}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
             </View>
             <View style={styles.dateFilterRow}>
               <TouchableOpacity
@@ -882,6 +1003,8 @@ const OrderListScreen = ({ navigation, route }) => {
               nestedScrollEnabled={true}
               contentContainerStyle={[styles.listContent, { flexGrow: 1, paddingBottom: 90 }]}
             />
+          )}
+            </>
           )}
         </>
       )}
@@ -1139,6 +1262,14 @@ const styles = StyleSheet.create({
   },
   selectedStatusButtonText: {
     color: '#FFFFFF',
+    fontWeight: '700',
+  },
+  statusButtonPaymentPendingAlert: {
+    borderColor: '#F59E0B',
+    backgroundColor: '#FFFBEB',
+  },
+  statusButtonTextPaymentPendingAlert: {
+    color: '#D97706',
     fontWeight: '700',
   },
   dateFilterRow: {

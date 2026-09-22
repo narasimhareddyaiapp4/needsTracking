@@ -77,6 +77,7 @@ import UpiQrScreen from './src/screens/UpiQrScreen';
 import CustomerDamageScreen from './src/screens/CustomerDamageScreen';
 import CatalogManagementScreen from './src/screens/CatalogManagementScreen';
 import ProductDetailScreen from './src/screens/ProductDetailScreen';
+import SellerSalesReportScreen from './src/screens/SellerSalesReportScreen';
 
 // Import custom navigators
 import ProductTabNavigator from './src/navigation/ProductTabNavigator';
@@ -577,6 +578,7 @@ function AppInner() {
             <Stack.Screen name="TopProducts" component={TopProductsScreen} />
             <Stack.Screen name="OrderDetail" component={OrderDetailScreen} />
             <Stack.Screen name="OrderEdit" component={OrderEditScreen} />
+            <Stack.Screen name="SellerSalesReport" component={SellerSalesReportScreen} />
             <Stack.Screen name="Login" component={LoginScreen} />
             <Stack.Screen name="Signup" component={SignupScreen} />
             <Stack.Screen name="SellerLogin" component={SellerLoginScreen} />

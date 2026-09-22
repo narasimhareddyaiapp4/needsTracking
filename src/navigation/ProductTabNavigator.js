@@ -21,6 +21,7 @@ import UpiQrScreen from '../screens/UpiQrScreen';
 import OrderConfirmationScreen from '../screens/OrderConfirmationScreen';
 import CartScreen from '../screens/CartScreen';
 import CatalogManagementScreen from '../screens/CatalogManagementScreen';
+import SellerSalesReportScreen from '../screens/SellerSalesReportScreen';
 
 const Tab = createBottomTabNavigator();
 const OrdersStack = createStackNavigator();
@@ -43,6 +44,11 @@ function OrdersStackNavigator({ route }) {
       <OrdersStack.Screen
         name="OrderEdit"
         component={OrderEditScreen}
+        initialParams={route?.params}
+      />
+      <OrdersStack.Screen
+        name="SellerSalesReport"
+        component={SellerSalesReportScreen}
         initialParams={route?.params}
       />
     </OrdersStack.Navigator>
@@ -154,6 +160,8 @@ function ProductTabNavigator({ route }) {
             iconName = 'book';
           } else if (route.name === 'OrdersTab') {
             iconName = 'list-alt';
+          } else if (route.name === 'ReportsTab') {
+            iconName = 'bar-chart';
           } else if (route.name === 'DamageTab') {
             iconName = 'exclamation-triangle';
           } else if (route.name === 'MapTab') {
@@ -244,6 +252,12 @@ function ProductTabNavigator({ route }) {
             component={OrdersStackNavigator}
             options={{ title: 'Orders' }}
             initialParams={{ session, userId, customerId }}
+          />
+          <Tab.Screen
+            name="ReportsTab"
+            component={SellerSalesReportScreen}
+            options={{ title: 'Reports' }}
+            initialParams={{ session, userId, sellerId: userId, customerId }}
           />
           <Tab.Screen
             name="InventoryTab"

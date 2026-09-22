@@ -404,7 +404,13 @@ const OrderDetailScreen = ({ navigation, route }) => {
           onPress: async () => {
             const updated = await updateOrderPaymentStatus(orderId, nextStatus);
             if (updated) {
-              setOrder(prev => ({ ...prev, payment_status: nextStatus }));
+              setOrder(prev => ({
+                ...prev,
+                payment_status: nextStatus,
+                status: (nextStatus === 'paid' && (prev?.status || '').toLowerCase() === 'pending_payment')
+                  ? 'processing'
+                  : prev?.status,
+              }));
               Alert.alert('Success', `Payment marked as ${nextStatus.toUpperCase()}.`);
             } else {
               Alert.alert('Error', 'Failed to update payment status.');
@@ -840,7 +846,7 @@ const OrderDetailScreen = ({ navigation, route }) => {
           <Text style={styles.label}>Order Status</Text>
           <View style={styles.statusRow}>
             <View style={[styles.statusBadge, getStatusStyle(order.status)]}>
-              <Text style={styles.statusBadgeText}>{(order.status || 'Pending').toUpperCase()}</Text>
+              <Text style={styles.statusBadgeText}>{(order.status ? order.status.replace(/_/g, ' ') : 'Pending').toUpperCase()}</Text>
             </View>
             <Text style={styles.statusDateText}>{new Date(order.created_at).toLocaleString()}</Text>
           </View>
@@ -856,6 +862,7 @@ const OrderDetailScreen = ({ navigation, route }) => {
                 onValueChange={(itemValue) => setSelectedStatus(itemValue)}
                 style={styles.picker}
               >
+                <Picker.Item label="Payment Pending" value="pending_payment" />
                 <Picker.Item label="Pending" value="pending" />
                 <Picker.Item label="Processing" value="processing" />
                 <Picker.Item label="Out for Delivery" value="out_for_delivery" />
@@ -1235,6 +1242,7 @@ function getStatusStyle(status) {
   if (s.includes('completed') || s.includes('delivered')) return { backgroundColor: '#ECFDF5' };
   if (s.includes('out')) return { backgroundColor: '#EFF6FF' };
   if (s.includes('cancelled')) return { backgroundColor: '#FEF2F2' };
+  if (s.includes('pending_payment') || s.includes('payment')) return { backgroundColor: '#FEF3C7' };
   return { backgroundColor: '#FFFBEB' };
 }
 

@@ -71,7 +71,11 @@ const OrderEditScreen = ({ route, navigation }) => {
       return;
     }
     setIsSaving(true);
-    const updatedOrder = await updateOrderStatus(orderId, status);
+    let targetStatus = status;
+    if (paymentStatus === 'paid' && (targetStatus || '').toLowerCase() === 'pending_payment') {
+      targetStatus = 'processing';
+    }
+    const updatedOrder = await updateOrderStatus(orderId, targetStatus);
     await updateOrderPaymentStatus(orderId, paymentStatus);
     if (updatedOrder) {
       Alert.alert('Success', 'Order and payment status updated successfully!');
@@ -235,6 +239,7 @@ const OrderEditScreen = ({ route, navigation }) => {
               onValueChange={(itemValue) => setStatus(itemValue)}
               style={styles.picker}
             >
+              <Picker.Item label="Payment Pending" value="pending_payment" />
               <Picker.Item label="Pending" value="pending" />
               <Picker.Item label="Processing" value="processing" />
               <Picker.Item label="Out for Delivery" value="out_for_delivery" />

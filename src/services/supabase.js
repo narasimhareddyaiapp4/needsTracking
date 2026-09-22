@@ -1423,9 +1423,25 @@ export async function updateOrderStatus(orderId, newStatus) {
 
 export async function updateOrderPaymentStatus(orderId, paymentStatus) {
   try {
+    let updatePayload = { payment_status: paymentStatus };
+
+    // If payment is confirmed as paid, also transition pending_payment orders to processing
+    if (paymentStatus === 'paid') {
+      try {
+        const { data: cur } = await supabase
+          .from('orders')
+          .select('status')
+          .eq('id', orderId)
+          .maybeSingle();
+        if (cur?.status === 'pending_payment') {
+          updatePayload.status = 'processing';
+        }
+      } catch (_) {}
+    }
+
     let { data, error } = await supabase
       .from('orders')
-      .update({ payment_status: paymentStatus })
+      .update(updatePayload)
       .eq('id', orderId)
       .select();
 
@@ -1433,16 +1449,20 @@ export async function updateOrderPaymentStatus(orderId, paymentStatus) {
       // payment_status column not yet in orders table, fallback to shipping_address JSON
       const { data: currentOrder } = await supabase
         .from('orders')
-        .select('shipping_address')
+        .select('shipping_address, status')
         .eq('id', orderId)
         .single();
       const currentShipping = typeof currentOrder?.shipping_address === 'object' && currentOrder?.shipping_address !== null
         ? currentOrder.shipping_address
         : { address: currentOrder?.shipping_address };
       const updatedShipping = { ...currentShipping, payment_status: paymentStatus };
+      const fallbackPayload = { shipping_address: updatedShipping };
+      if (paymentStatus === 'paid' && currentOrder?.status === 'pending_payment') {
+        fallbackPayload.status = 'processing';
+      }
       const res = await supabase
         .from('orders')
-        .update({ shipping_address: updatedShipping })
+        .update(fallbackPayload)
         .eq('id', orderId)
         .select();
       return res.data ? res.data[0] : null;
@@ -2651,3 +2671,75 @@ export async function seedMasterCatalogData() {
   }
 }
 
+/**
+ * Fetch seller orders and line items for sales analytics and reports across any date range.
+ * Supports hourly distribution analysis and product contribution breakdown.
+ */
+export async function getSellerOrdersForReport(sellerId, { startDate, endDate } = {}) {
+  if (!sellerId) return [];
+
+  const selectQuery = `
+    id,
+    created_at,
+    total_amount,
+    status,
+    payment_status,
+    payment_method,
+    order_type,
+    seller_id,
+    user_id,
+    order_items (
+      id,
+      quantity,
+      price,
+      product_variant_combination_id,
+      product_variant_combinations (
+        id,
+        combination_string,
+        price,
+        products (
+          id,
+          product_name
+        )
+      )
+    )
+  `;
+
+  try {
+    let query = supabase
+      .from('orders')
+      .select(selectQuery)
+      .or(`seller_id.eq.${sellerId},user_id.eq.${sellerId}`)
+      .order('created_at', { ascending: true });
+
+    if (startDate) {
+      const s = new Date(startDate);
+      s.setHours(0, 0, 0, 0);
+      query = query.gte('created_at', s.toISOString());
+    }
+    if (endDate) {
+      const e = new Date(endDate);
+      e.setHours(23, 59, 59, 999);
+      query = query.lte('created_at', e.toISOString());
+    }
+
+    const { data, error } = await query;
+    if (error) {
+      console.warn('getSellerOrdersForReport query notice:', error.message);
+      // Fallback: fetch all via getOrders and filter locally
+      const all = await getOrders(sellerId, { role: 'seller', isSeller: true });
+      if (!all) return [];
+      return all.filter((o) => {
+        const t = new Date(o.created_at).getTime();
+        if (startDate && t < new Date(startDate).setHours(0, 0, 0, 0)) return false;
+        if (endDate && t > new Date(endDate).setHours(23, 59, 59, 999)) return false;
+        return true;
+      });
+    }
+
+    return data || [];
+  } catch (err) {
+    console.error('getSellerOrdersForReport exception:', err);
+    return [];
+  }
+}
