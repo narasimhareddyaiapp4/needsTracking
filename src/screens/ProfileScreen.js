@@ -217,6 +217,28 @@ const ProfileScreen = ({ navigation, route }) => {
     }
   };
 
+  const handleTogglePrintDynamicQr = async (val) => {
+    try {
+      const updated = { ...(printerConfig || DEFAULT_PRINTER_CONFIG), printDynamicQr: val };
+      setPrinterConfig(updated);
+      await savePrinterConfig(updated);
+      syncTaxSettingsToAuth(updated);
+      if (profile?.id) {
+        try {
+          await supabase.from('profiles').update({ print_qr_on_receipt: val }).eq('id', profile.id);
+        } catch (_) {}
+      }
+      showAlert(
+        'Dynamic QR on Receipt Updated',
+        val
+          ? 'Dynamic Payment QR Code with exact bill price will now be printed on receipts.'
+          : 'Payment QR Code is turned OFF on printed receipts.'
+      );
+    } catch (err) {
+      console.warn('Error updating printDynamicQr in profile:', err);
+    }
+  };
+
   const syncTaxSettingsToAuth = async (cfg) => {
     try {
       await supabase.auth.updateUser({
@@ -228,6 +250,7 @@ const ProfileScreen = ({ navigation, route }) => {
             enable_service_cost: cfg.enableServiceCost === true,
             service_cost_rate: cfg.serviceCostRate !== undefined ? Number(cfg.serviceCostRate) : 0,
             print_tax_breakdown: cfg.printTaxBreakdown !== false,
+            print_qr_on_receipt: cfg.printDynamicQr !== false,
           },
         },
       });
@@ -512,6 +535,7 @@ const ProfileScreen = ({ navigation, route }) => {
             enableServiceCost: data.enable_service_cost !== undefined && data.enable_service_cost !== null ? Boolean(data.enable_service_cost) : (metaTax.enable_service_cost !== undefined ? Boolean(metaTax.enable_service_cost) : undefined),
             serviceCostRate: data.service_cost_rate !== undefined && data.service_cost_rate !== null ? Number(data.service_cost_rate) : (metaTax.service_cost_rate !== undefined ? Number(metaTax.service_cost_rate) : undefined),
             printTaxBreakdown: data.print_tax_breakdown !== undefined && data.print_tax_breakdown !== null ? Boolean(data.print_tax_breakdown) : (metaTax.print_tax_breakdown !== undefined ? Boolean(metaTax.print_tax_breakdown) : undefined),
+            printDynamicQr: data.print_qr_on_receipt !== undefined && data.print_qr_on_receipt !== null ? Boolean(data.print_qr_on_receipt) : (metaTax.print_qr_on_receipt !== undefined ? Boolean(metaTax.print_qr_on_receipt) : undefined),
           };
           const cleanSynced = Object.fromEntries(Object.entries(syncedTaxConfig).filter(([_, v]) => v !== undefined));
           if (Object.keys(cleanSynced).length > 0) {
@@ -2512,6 +2536,24 @@ const ProfileScreen = ({ navigation, route }) => {
             </Text>
           </View>
         )}
+
+        {/* Configurable Seller Setting: Print Dynamic QR Code with Price on Receipt & Orders */}
+        {!isBuyer && (
+          <View style={styles.upiDynamicQrConfigBox}>
+            <View style={{ flex: 1, marginRight: 12 }}>
+              <Text style={styles.upiDynamicQrConfigTitle}>Print Dynamic QR on Receipts &amp; Orders</Text>
+              <Text style={styles.upiDynamicQrConfigSub}>
+                Print dynamic UPI payment QR with exact order bill price on thermal receipts, order confirmations, and orders.
+              </Text>
+            </View>
+            <Switch
+              value={printerConfig?.printDynamicQr !== false}
+              onValueChange={handleTogglePrintDynamicQr}
+              trackColor={{ false: '#CBD5E1', true: '#93C5FD' }}
+              thumbColor={printerConfig?.printDynamicQr !== false ? '#007AFF' : '#F1F5F9'}
+            />
+          </View>
+        )}
       </View>
 
       {/* Input Fields */}
@@ -2939,6 +2981,24 @@ const ProfileScreen = ({ navigation, route }) => {
               onValueChange={handleTogglePrintTaxBreakdown}
               trackColor={{ false: '#CBD5E1', true: '#93C5FD' }}
               thumbColor={printerConfig?.printTaxBreakdown !== false ? '#007AFF' : '#F1F5F9'}
+            />
+          </View>
+
+          <View style={styles.printerDivider} />
+
+          {/* Toggle: Print Dynamic QR Code with Price on Receipt */}
+          <View style={styles.printerToggleRow}>
+            <View style={{ flex: 1, marginRight: 12 }}>
+              <Text style={styles.printerToggleTitle}>Print Dynamic QR Code with Price</Text>
+              <Text style={styles.printerToggleSub}>
+                Print dynamic UPI payment QR code with the exact bill price on every receipt so buyers can scan and pay anytime.
+              </Text>
+            </View>
+            <Switch
+              value={printerConfig?.printDynamicQr !== false}
+              onValueChange={handleTogglePrintDynamicQr}
+              trackColor={{ false: '#CBD5E1', true: '#93C5FD' }}
+              thumbColor={printerConfig?.printDynamicQr !== false ? '#007AFF' : '#F1F5F9'}
             />
           </View>
 
@@ -4664,6 +4724,28 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 13,
     fontWeight: '700',
+  },
+  upiDynamicQrConfigBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#F0FDF4',
+    borderColor: '#BBF7D0',
+    borderWidth: 1,
+    borderRadius: 12,
+    padding: 12,
+    marginTop: 14,
+  },
+  upiDynamicQrConfigTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#15803D',
+  },
+  upiDynamicQrConfigSub: {
+    fontSize: 12,
+    color: '#166534',
+    marginTop: 3,
+    lineHeight: 16,
   },
 });
 

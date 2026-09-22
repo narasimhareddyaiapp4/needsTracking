@@ -2,6 +2,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Alert, Platform } from 'react-native';
 import * as Print from 'expo-print';
+import QRCode from 'qrcode';
 import { supabase } from './supabase';
 import { announceOrderPrint } from './speechService';
 export { announceOrderPrint };
@@ -31,6 +32,7 @@ export const DEFAULT_PRINTER_CONFIG = {
   enableServiceCost: false, // Option to enable/disable service charge on billing & receipts
   serviceCostRate: 0, // Service cost percentage e.g. 5%
   printTaxBreakdown: true, // Option to print CGST, SGST, Service Cost itemized rows on receipt
+  printDynamicQr: true, // Option to print dynamic UPI QR code with exact order price on receipt
 };
 
 // Global active Web Bluetooth BLE device/characteristic instance
@@ -58,6 +60,7 @@ export const getPrinterConfig = async () => {
         enableServiceCost: parsed.enableServiceCost !== undefined ? Boolean(parsed.enableServiceCost) : false,
         serviceCostRate: parsed.serviceCostRate !== undefined ? Number(parsed.serviceCostRate) : 0,
         printTaxBreakdown: parsed.printTaxBreakdown !== undefined ? Boolean(parsed.printTaxBreakdown) : true,
+        printDynamicQr: parsed.printDynamicQr !== undefined ? Boolean(parsed.printDynamicQr) : true,
       };
     }
   } catch (err) {
@@ -538,6 +541,44 @@ export const generateEscPosBytes = (data, config = DEFAULT_PRINTER_CONFIG) => {
     addText(formatTwoColumns('Payment Status:', String(data.paymentStatus).toUpperCase(), width));
   }
 
+  // Dynamic Payment QR Code on Receipt (Configurable by seller profile & printer settings)
+  if (data.shouldPrintQr !== false && config.printDynamicQr !== false && data.dynamicQrText) {
+    addBytes(CMD_ALIGN_CENTER);
+    addText(separator);
+    addBytes(CMD_BOLD_ON);
+    addText(`SCAN & PAY: ${currencySymbol}${safeFormatPrice(computedTotal, '')}`);
+    addBytes(CMD_BOLD_OFF);
+
+    try {
+      const qrData = data.dynamicQrText;
+      const storeLen = qrData.length + 3;
+      const pL = storeLen % 256;
+      const pH = Math.floor(storeLen / 256);
+
+      // Model 2
+      addBytes([GS, 0x28, 0x6b, 0x04, 0x00, 0x31, 0x41, 0x32, 0x00]);
+      // Module size (4 for 58mm, 6 for 80mm)
+      const qrSize = config.paperWidth === '80mm' ? 6 : 4;
+      addBytes([GS, 0x28, 0x6b, 0x03, 0x00, 0x31, 0x43, qrSize]);
+      // Error correction Level M
+      addBytes([GS, 0x28, 0x6b, 0x03, 0x00, 0x31, 0x45, 0x31]);
+      // Store data
+      const storeHeader = [GS, 0x28, 0x6b, pL, pH, 0x31, 0x50, 0x30];
+      const qrBytes = encoder.encode(qrData);
+      const fullStoreCmd = new Uint8Array(storeHeader.length + qrBytes.length);
+      fullStoreCmd.set(storeHeader, 0);
+      fullStoreCmd.set(qrBytes, storeHeader.length);
+      addBytes(fullStoreCmd);
+      // Print QR
+      addBytes([GS, 0x28, 0x6b, 0x03, 0x00, 0x31, 0x51, 0x30]);
+    } catch (_) {}
+
+    if (data.sellerUpiId) {
+      addText(`UPI: ${data.sellerUpiId}`);
+    }
+    addText('Pay via GPay / PhonePe / Paytm');
+  }
+
   // 8. Footer
   addBytes(CMD_ALIGN_CENTER);
   addText(separator);
@@ -776,6 +817,18 @@ export const generateReceiptHtml = (data, config = DEFAULT_PRINTER_CONFIG) => {
           ${data.paymentMethod ? `<div class="meta-row"><span>Payment:</span><span class="bold">${String(data.paymentMethod).toUpperCase()}</span></div>` : ''}
           ${data.paymentReference ? `<div class="meta-row"><span>UPI/Pay Ref:</span><span class="bold">${escapeHtml(data.paymentReference)}</span></div>` : ''}
           ${data.paymentStatus ? `<div class="meta-row"><span>Status:</span><span class="bold">${String(data.paymentStatus).toUpperCase()}</span></div>` : ''}
+
+          ${(data.shouldPrintQr !== false && config.printDynamicQr !== false && (data.dynamicQrUrl || data.dynamicQrText)) ? `
+          <div class="divider"></div>
+          <div class="center qr-receipt-section" style="margin: 6px 0; text-align: center;">
+            <div style="font-weight: 800; font-size: ${is80mm ? '12px' : '10.5px'}; margin-bottom: 4px; letter-spacing: 0.5px;">
+              ⚡ SCAN &amp; PAY: ${currencySymbol}${safeFormatNumber(computedTotal)}
+            </div>
+            <img src="${data.dynamicQrUrl || `https://api.qrserver.com/v1/create-qr-code/?size=250x250&margin=4&data=${encodeURIComponent(data.dynamicQrText)}`}" alt="Payment QR" style="width: ${is80mm ? '140px' : '110px'}; height: ${is80mm ? '140px' : '110px'}; margin: 0 auto; display: block;" />
+            ${data.sellerUpiId ? `<div style="font-size: ${is80mm ? '10px' : '8.5px'}; font-weight: bold; margin-top: 3px; color: #111;">UPI: ${escapeHtml(data.sellerUpiId)}</div>` : ''}
+            <div style="font-size: ${is80mm ? '9px' : '7.5px'}; color: #555; margin-top: 1px;">Google Pay • PhonePe • Paytm • Any UPI App</div>
+          </div>
+          ` : ''}
 
           <div class="center footer">
             <div>${config.footerNote || 'Thank You! Visit Again.'}</div>
@@ -1197,6 +1250,80 @@ export const printReceipt = async (orderDetails, options = {}) => {
 
     const orderType = order.order_type || (order.table_no ? (order.table_no === 'Parcel' ? 'Takeaway / Parcel' : `Dine-In (Table #${order.table_no})`) : 'Delivery');
 
+    // Dynamic Payment QR Code Resolution (Configurable by seller profile & printer settings)
+    let shouldPrintQr = config.printDynamicQr !== false;
+    let sellerUpiId = order.seller_upi_id || order.upi_id || shippingBilling?.upi_id || null;
+    let resolvedSellerName = options.storeName || order.seller_name || config.storeName || 'Store';
+    const sellerId =
+      order.seller_id ||
+      order.order_items?.[0]?.product_variant_combinations?.products?.user_id ||
+      order.order_items?.[0]?.product_variant_combinations?.products?.customer_id ||
+      order.user_id ||
+      null;
+
+    // Check seller profile settings from Supabase if sellerId is present
+    if (sellerId) {
+      try {
+        const { data: sellerProf } = await supabase
+          .from('profiles')
+          .select('upi_id, full_name, print_qr_on_receipt')
+          .eq('id', sellerId)
+          .maybeSingle();
+
+        if (sellerProf) {
+          if (sellerProf.print_qr_on_receipt === false) {
+            shouldPrintQr = false;
+          } else if (sellerProf.print_qr_on_receipt === true) {
+            shouldPrintQr = true;
+          }
+          if (!sellerUpiId && sellerProf.upi_id) {
+            sellerUpiId = sellerProf.upi_id;
+          }
+          if (sellerProf.full_name && !options.storeName && !order.seller_name) {
+            resolvedSellerName = sellerProf.full_name;
+          }
+        }
+      } catch (profErr) {
+        console.warn('[PrinterService] Seller profile query notice:', profErr);
+      }
+
+      // If UPI ID still missing, check user_qr_codes table for active QR code
+      if (!sellerUpiId && shouldPrintQr) {
+        try {
+          const { data: qrRow } = await supabase
+            .from('user_qr_codes')
+            .select('name, qr_image_url')
+            .eq('user_id', sellerId)
+            .eq('is_active', true)
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .maybeSingle();
+
+          if (qrRow?.name && qrRow.name.includes('@')) {
+            sellerUpiId = qrRow.name.trim();
+          }
+        } catch (_) {}
+      }
+    }
+
+    let dynamicQrText = null;
+    let dynamicQrUrl = null;
+
+    if (shouldPrintQr && total > 0) {
+      const cleanUpi = sellerUpiId ? sellerUpiId.trim() : null;
+      if (cleanUpi) {
+        dynamicQrText = `upi://pay?pa=${encodeURIComponent(cleanUpi)}&pn=${encodeURIComponent(resolvedSellerName)}&am=${total.toFixed(2)}&cu=INR&tn=Order%20${encodeURIComponent(orderNumber)}`;
+      } else {
+        dynamicQrText = `upi://pay?pn=${encodeURIComponent(resolvedSellerName)}&am=${total.toFixed(2)}&cu=INR&tn=Order%20${encodeURIComponent(orderNumber)}`;
+      }
+
+      try {
+        dynamicQrUrl = await QRCode.toDataURL(dynamicQrText, { width: 250, margin: 2 });
+      } catch (qrErr) {
+        dynamicQrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=250x250&margin=4&data=${encodeURIComponent(dynamicQrText)}`;
+      }
+    }
+
     const payload = {
       title: options.title || 'TAX INVOICE / ORDER RECEIPT',
       orderId: orderNumber,
@@ -1226,7 +1353,12 @@ export const printReceipt = async (orderDetails, options = {}) => {
       paymentMethod: String(order.payment_method || 'CASH').toUpperCase(),
       paymentReference: extractOrderNumbers(order).paymentReference,
       paymentStatus: String(order.payment_status || (order.status === 'completed' || order.status === 'paid' ? 'PAID' : 'PENDING')).toUpperCase(),
-      storeName: options.storeName || undefined,
+      storeName: options.storeName || resolvedSellerName || undefined,
+      dynamicQrText,
+      dynamicQrUrl,
+      sellerUpiId,
+      shouldPrintQr,
+      printDynamicQr: shouldPrintQr,
     };
 
     const result = await printDataPayload(payload);

@@ -33,6 +33,7 @@ import {
 import { getGuestCart, clearGuestCart, getPreferredStore, saveGuestOrderId } from '../services/localStorageService';
 import { schedulePushNotification } from '../services/notificationService';
 import { showAlert } from '../utils/alertUtils';
+import { downloadQrCodeImage } from '../utils/qrDownloadUtils';
 import { getPrinterConfig } from '../services/printerService';
 import StoreNavigationFooter from '../components/StoreNavigationFooter';
 import FullScreenImageViewer from '../components/FullScreenImageViewer';
@@ -609,6 +610,37 @@ const CheckoutScreen = ({ navigation, route }) => {
     qrTab === 'profile' && profileQrImageUrl
       ? profileQrImageUrl
       : (dynamicQrDataUrl || fallbackDynamicQrUrl || profileQrImageUrl);
+
+  const [isDownloadingQr, setIsDownloadingQr] = useState(false);
+
+  const handleDownloadQrCode = async () => {
+    let targetUri = displayedQrUri;
+    if (!targetUri && dynamicUpiUri) {
+      try {
+        targetUri = await generateQrDataUrl(dynamicUpiUri, { width: 400, margin: 2 });
+      } catch (_) {
+        targetUri = fallbackDynamicQrUrl;
+      }
+    }
+    if (!targetUri) {
+      targetUri = profileQrImageUrl;
+    }
+    if (!targetUri) {
+      showAlert('QR Code Unavailable', 'Payment QR code is still generating. Please wait a moment.');
+      return;
+    }
+    setIsDownloadingQr(true);
+    try {
+      const sellerTag = resolvedSellerName ? `-${resolvedSellerName.replace(/[^a-zA-Z0-9_-]/g, '_')}` : '';
+      const fileName = `Order-Payment-QR-Rs${Math.round(totalAmount)}${sellerTag}`;
+      await downloadQrCodeImage(targetUri, fileName);
+    } catch (err) {
+      console.warn('QR download error in checkout:', err);
+      showAlert('Download Error', 'Could not download QR code: ' + (err.message || 'Unknown error'));
+    } finally {
+      setIsDownloadingQr(false);
+    }
+  };
 
   // Prompt Order Type when Pay with UPI is clicked
   const handlePayWithUpiPress = (action = 'select_upi') => {
@@ -2157,6 +2189,28 @@ const CheckoutScreen = ({ navigation, route }) => {
               )}
             </View>
 
+            {/* Highlighted QR Code Download to Device Button */}
+            <TouchableOpacity
+              style={styles.downloadQrHighlightBtn}
+              onPress={handleDownloadQrCode}
+              disabled={isDownloadingQr}
+              activeOpacity={0.84}
+              accessibilityLabel="Download QR code image to device"
+            >
+              {isDownloadingQr ? (
+                <ActivityIndicator size="small" color="#FFFFFF" style={{ marginRight: 10 }} />
+              ) : (
+                <View style={styles.downloadIconBadge}>
+                  <Icon name="download" size={17} color="#FFFFFF" />
+                </View>
+              )}
+              <View style={styles.downloadQrTextContainer}>
+                <Text style={styles.downloadQrBtnText}>Download QR Code to Device</Text>
+                <Text style={styles.downloadQrBtnSubText}>Save QR to gallery &amp; pay anytime with any UPI app</Text>
+              </View>
+              <Icon name="chevron-right" size={14} color="#FFFFFF" style={{ opacity: 0.85, marginLeft: 6 }} />
+            </TouchableOpacity>
+
             <Text style={styles.qrScanInstruction}>
               {qrTab === 'profile' && profileQrImageUrl
                 ? `Scan Seller's Store Standee QR code with Google Pay, PhonePe, Paytm or any UPI app to pay ₹${totalAmount.toFixed(2)}.`
@@ -3041,6 +3095,46 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     color: '#FFFFFF',
     letterSpacing: 0.4,
+  },
+  downloadQrHighlightBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#059669', // Vivid emerald green highlight
+    borderRadius: 14,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    marginBottom: 14,
+    borderWidth: 1.5,
+    borderColor: '#047857',
+    shadowColor: '#059669',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 6,
+    elevation: 4,
+  },
+  downloadIconBadge: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'rgba(255, 255, 255, 0.22)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+  },
+  downloadQrTextContainer: {
+    flex: 1,
+  },
+  downloadQrBtnText: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: '#FFFFFF',
+    letterSpacing: 0.3,
+  },
+  downloadQrBtnSubText: {
+    fontSize: 11,
+    color: '#D1FAE5',
+    marginTop: 2,
+    fontWeight: '500',
   },
   qrScanInstruction: {
     fontSize: 12,

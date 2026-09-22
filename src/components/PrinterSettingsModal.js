@@ -568,6 +568,24 @@ const PrinterSettingsModal = ({ visible, onClose }) => {
                     thumbColor={config.printTaxBreakdown !== false ? '#007AFF' : '#F1F5F9'}
                   />
                 </View>
+
+                <View style={styles.settingDivider} />
+
+                {/* Print Dynamic QR Code with Price Toggle */}
+                <View style={styles.switchRow}>
+                  <View style={{ flex: 1, marginRight: 12 }}>
+                    <Text style={styles.switchLabel}>Print Dynamic QR Code with Price</Text>
+                    <Text style={styles.switchDescription}>
+                      Print dynamic UPI payment QR code with the exact order bill price on customer receipts so buyers can scan and pay anytime.
+                    </Text>
+                  </View>
+                  <Switch
+                    value={config.printDynamicQr !== false}
+                    onValueChange={(val) => setConfig({ ...config, printDynamicQr: val })}
+                    trackColor={{ false: '#CBD5E1', true: '#93C5FD' }}
+                    thumbColor={config.printDynamicQr !== false ? '#007AFF' : '#F1F5F9'}
+                  />
+                </View>
               </View>
 
               {/* Test Print Slip */}

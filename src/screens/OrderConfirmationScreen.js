@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -6,11 +6,28 @@ import {
   TouchableOpacity,
   ScrollView,
   Platform,
+  Image,
+  ActivityIndicator,
+  Linking,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/FontAwesome';
+import * as Clipboard from 'expo-clipboard';
 import { printReceipt, extractOrderNumbers, announceOrderPrint } from '../services/printerService';
 import PrinterSettingsModal from '../components/PrinterSettingsModal';
 import StoreNavigationFooter from '../components/StoreNavigationFooter';
+import FullScreenImageViewer from '../components/FullScreenImageViewer';
+import { downloadQrCodeImage } from '../utils/qrDownloadUtils';
+import { showAlert } from '../utils/alertUtils';
+import { supabase, getActiveQrCode } from '../services/supabase';
+import {
+  generateQrDataUrl,
+  buildUpiPaymentUri,
+  buildAndroidIntentUri,
+  normalizeUpiId,
+  isGenericQrName,
+  decodeQrFromImage,
+  parseUpiString,
+} from '../services/qrScanService';
 
 const OrderConfirmationScreen = ({ navigation, route }) => {
   const { order, customerId } = route?.params || {};
@@ -24,6 +41,165 @@ const OrderConfirmationScreen = ({ navigation, route }) => {
     null;
   const resolvedSellerName = route?.params?.sellerName || order?.seller_name || null;
   const resolvedCustomerId = route?.params?.customerId || customerId || order?.customer_id || null;
+
+  const totalAmount = Number(order?.total_amount || 0);
+  const [sellerUpiId, setSellerUpiId] = useState('');
+  const [sellerDisplayName, setSellerDisplayName] = useState(resolvedSellerName || 'Store');
+  const [dynamicQrUri, setDynamicQrUri] = useState('');
+  const [dynamicQrDataUrl, setDynamicQrDataUrl] = useState(null);
+  const [loadingQr, setLoadingQr] = useState(true);
+  const [isDownloadingQr, setIsDownloadingQr] = useState(false);
+  const [copiedUpi, setCopiedUpi] = useState(false);
+  const [isQrViewerVisible, setIsQrViewerVisible] = useState(false);
+
+  useEffect(() => {
+    let isMounted = true;
+    const loadSellerPaymentInfo = async () => {
+      setLoadingQr(true);
+      let resolvedUpi = '';
+      let name = resolvedSellerName || '';
+
+      // 1. Direct from order
+      if (order?.seller_upi_id && !isGenericQrName(order.seller_upi_id)) {
+        resolvedUpi = normalizeUpiId(order.seller_upi_id);
+      } else if (order?.upi_id && !isGenericQrName(order.upi_id)) {
+        resolvedUpi = normalizeUpiId(order.upi_id);
+      }
+
+      // 2. Shipping billing info
+      if (!resolvedUpi) {
+        const confBilling = order?.billing || (typeof order?.shipping_address === 'object' ? order.shipping_address?.billing : null);
+        if (confBilling?.upi_id && !isGenericQrName(confBilling.upi_id)) {
+          resolvedUpi = normalizeUpiId(confBilling.upi_id);
+        }
+      }
+
+      // 3. Query profiles for seller
+      if (!resolvedUpi && resolvedSellerId) {
+        try {
+          const { data: prof } = await supabase
+            .from('profiles')
+            .select('upi_id, full_name')
+            .eq('id', resolvedSellerId)
+            .maybeSingle();
+          if (prof?.upi_id && !isGenericQrName(prof.upi_id)) {
+            resolvedUpi = normalizeUpiId(prof.upi_id);
+          }
+          if (!name && prof?.full_name) {
+            name = prof.full_name;
+          }
+        } catch (_) {}
+      }
+
+      // 4. Query user_qr_codes for seller
+      if (resolvedSellerId) {
+        try {
+          const qrData = await getActiveQrCode(resolvedSellerId);
+          if (qrData) {
+            if (!resolvedUpi && qrData.name && !isGenericQrName(qrData.name)) {
+              const norm = normalizeUpiId(qrData.name);
+              if (norm && !isGenericQrName(norm)) {
+                resolvedUpi = norm;
+              }
+            }
+            if (!resolvedUpi && (qrData.qr_image_url || qrData.qr_code_url)) {
+              try {
+                const decoded = await decodeQrFromImage(qrData.qr_image_url || qrData.qr_code_url);
+                if (decoded) {
+                  const parsed = parseUpiString(decoded);
+                  if (parsed?.upiId && !isGenericQrName(parsed.upiId)) {
+                    resolvedUpi = normalizeUpiId(parsed.upiId);
+                  }
+                }
+              } catch (_) {}
+            }
+          }
+        } catch (_) {}
+      }
+
+      if (!isMounted) return;
+
+      setSellerUpiId(resolvedUpi);
+      if (name) setSellerDisplayName(name);
+
+      const uri = buildUpiPaymentUri({
+        upiId: resolvedUpi || 'merchant@upi',
+        payeeName: name || 'Store',
+        amount: totalAmount > 0 ? totalAmount : undefined,
+        note: `Order ${orderNumber}`,
+      });
+
+      setDynamicQrUri(uri);
+
+      try {
+        const dataUrl = await generateQrDataUrl(uri, { width: 350, margin: 2 });
+        if (isMounted) setDynamicQrDataUrl(dataUrl);
+      } catch (_) {}
+
+      if (isMounted) setLoadingQr(false);
+    };
+
+    loadSellerPaymentInfo();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [order, resolvedSellerId, resolvedSellerName, orderNumber, totalAmount]);
+
+  const qrImageSource = dynamicQrDataUrl || (dynamicQrUri
+    ? `https://api.qrserver.com/v1/create-qr-code/?size=350x350&margin=8&data=${encodeURIComponent(dynamicQrUri)}`
+    : null);
+
+  const handleDownloadQr = async () => {
+    if (!qrImageSource) {
+      showAlert('Error', 'Payment QR code is not available yet.');
+      return;
+    }
+    setIsDownloadingQr(true);
+    try {
+      const fileName = `Order-${orderNumber}-Payment-QR-Rs${Math.round(totalAmount)}`;
+      await downloadQrCodeImage(qrImageSource, fileName);
+    } catch (err) {
+      showAlert('Download Error', 'Could not save QR code: ' + (err.message || 'Unknown error'));
+    } finally {
+      setIsDownloadingQr(false);
+    }
+  };
+
+  const handleCopyUpi = async () => {
+    if (!sellerUpiId) return;
+    try {
+      await Clipboard.setStringAsync(sellerUpiId);
+      setCopiedUpi(true);
+      setTimeout(() => setCopiedUpi(false), 2000);
+      showAlert('Copied', `UPI ID ${sellerUpiId} copied to clipboard.`);
+    } catch (_) {}
+  };
+
+  const handleOpenUpiApp = async (appId = 'any') => {
+    if (!dynamicQrUri) return;
+    try {
+      if (Platform.OS === 'android') {
+        const intentUri = buildAndroidIntentUri(dynamicQrUri, appId);
+        const can = await Linking.canOpenURL(intentUri);
+        if (can) {
+          await Linking.openURL(intentUri);
+          return;
+        }
+      }
+      const can = await Linking.canOpenURL(dynamicQrUri);
+      if (can) {
+        await Linking.openURL(dynamicQrUri);
+      } else {
+        showAlert(
+          'Open UPI App',
+          `Could not open UPI app directly. Please scan the QR code above or pay to:\n\n${sellerUpiId || 'Store'}\nExact Amount: ₹${totalAmount.toFixed(2)}`
+        );
+      }
+    } catch (err) {
+      showAlert('Notice', 'Please scan the QR code on screen using your phone camera or UPI app.');
+    }
+  };
 
   return (
     <View
@@ -150,6 +326,144 @@ const OrderConfirmationScreen = ({ navigation, route }) => {
             );
           })()}
 
+          {/* Dynamic Payment QR Code Card to Pay Anytime */}
+          <View style={styles.dynamicQrCard}>
+            <View style={styles.dynamicQrHeader}>
+              <View style={styles.qrHeaderIconCircle}>
+                <Icon name="qrcode" size={18} color="#007AFF" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.dynamicQrTitle}>Pay Anytime via Dynamic QR</Text>
+                <Text style={styles.dynamicQrSubtitle}>
+                  Exact bill pre-filled • Scan to pay anytime
+                </Text>
+              </View>
+              <View style={styles.liveTag}>
+                <Text style={styles.liveTagText}>⚡ DYNAMIC</Text>
+              </View>
+            </View>
+
+            <View style={styles.qrImageBox}>
+              {loadingQr ? (
+                <View style={styles.qrLoadingBox}>
+                  <ActivityIndicator size="large" color="#007AFF" />
+                  <Text style={styles.qrLoadingText}>Generating Payment QR...</Text>
+                </View>
+              ) : qrImageSource ? (
+                <TouchableOpacity
+                  activeOpacity={0.88}
+                  onPress={() => setIsQrViewerVisible(true)}
+                  style={styles.qrTouchable}
+                  accessibilityLabel="Tap to view full screen QR"
+                >
+                  <Image source={{ uri: qrImageSource }} style={styles.qrImg} resizeMode="contain" />
+                  <View style={styles.qrAmountOverlay}>
+                    <Text style={styles.qrAmountOverlayText}>
+                      Exact Bill: ₹{totalAmount.toFixed(2)}
+                    </Text>
+                  </View>
+                </TouchableOpacity>
+              ) : (
+                <Text style={{ color: '#64748B', marginVertical: 20 }}>QR Code not available</Text>
+              )}
+            </View>
+
+            {sellerUpiId ? (
+              <View style={styles.upiCopyRow}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
+                  <Icon name="credit-card" size={13} color="#475569" style={{ marginRight: 6 }} />
+                  <Text style={styles.upiCopyText} numberOfLines={1}>
+                    UPI: <Text style={{ fontWeight: '700', color: '#0F172A' }}>{sellerUpiId}</Text>
+                  </Text>
+                </View>
+                <TouchableOpacity
+                  style={[styles.copyUpiBtn, copiedUpi && styles.copyUpiBtnSuccess]}
+                  onPress={handleCopyUpi}
+                  activeOpacity={0.7}
+                >
+                  <Icon
+                    name={copiedUpi ? "check" : "copy"}
+                    size={12}
+                    color={copiedUpi ? "#16A34A" : "#007AFF"}
+                    style={{ marginRight: 4 }}
+                  />
+                  <Text style={[styles.copyUpiBtnText, copiedUpi && styles.copyUpiBtnTextSuccess]}>
+                    {copiedUpi ? 'Copied' : 'Copy'}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            ) : null}
+
+            {/* Highlighted Download Button with Icon */}
+            <TouchableOpacity
+              style={styles.downloadQrHighlightBtn}
+              onPress={handleDownloadQr}
+              disabled={isDownloadingQr || loadingQr}
+              activeOpacity={0.84}
+              accessibilityLabel="Download Payment QR to Device"
+            >
+              {isDownloadingQr ? (
+                <ActivityIndicator size="small" color="#FFFFFF" style={{ marginRight: 10 }} />
+              ) : (
+                <View style={styles.downloadIconBadge}>
+                  <Icon name="download" size={16} color="#FFFFFF" />
+                </View>
+              )}
+              <View style={styles.downloadQrTextContainer}>
+                <Text style={styles.downloadQrBtnText}>Download QR Code to Device</Text>
+                <Text style={styles.downloadQrBtnSubText}>
+                  Save QR to gallery so you can pay anytime
+                </Text>
+              </View>
+              <Icon name="chevron-right" size={14} color="#FFFFFF" style={{ opacity: 0.85, marginLeft: 6 }} />
+            </TouchableOpacity>
+
+            {/* Direct 1-Tap Pay via UPI Apps on Mobile */}
+            {Platform.OS !== 'web' && (
+              <View style={styles.quickPayAppsRow}>
+                <TouchableOpacity
+                  style={[styles.quickPayAppBtn, { backgroundColor: '#F0FDF4', borderColor: '#BBF7D0' }]}
+                  onPress={() => handleOpenUpiApp('gpay')}
+                  activeOpacity={0.8}
+                >
+                  <Icon name="google-wallet" size={13} color="#16A34A" style={{ marginRight: 4 }} />
+                  <Text style={[styles.quickPayAppText, { color: '#16A34A' }]}>GPay</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[styles.quickPayAppBtn, { backgroundColor: '#FAF5FF', borderColor: '#E9D5FF' }]}
+                  onPress={() => handleOpenUpiApp('phonepe')}
+                  activeOpacity={0.8}
+                >
+                  <Icon name="mobile-phone" size={16} color="#9333EA" style={{ marginRight: 4 }} />
+                  <Text style={[styles.quickPayAppText, { color: '#9333EA' }]}>PhonePe</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[styles.quickPayAppBtn, { backgroundColor: '#EFF6FF', borderColor: '#BFDBFE' }]}
+                  onPress={() => handleOpenUpiApp('paytm')}
+                  activeOpacity={0.8}
+                >
+                  <Icon name="shield" size={13} color="#007AFF" style={{ marginRight: 4 }} />
+                  <Text style={[styles.quickPayAppText, { color: '#007AFF' }]}>Paytm</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[styles.quickPayAppBtn, { backgroundColor: '#F8FAFC', borderColor: '#E2E8F0' }]}
+                  onPress={() => handleOpenUpiApp('any')}
+                  activeOpacity={0.8}
+                >
+                  <Icon name="qrcode" size={13} color="#475569" style={{ marginRight: 4 }} />
+                  <Text style={[styles.quickPayAppText, { color: '#475569' }]}>Any UPI</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+
+            <Text style={styles.qrHelpNote}>
+              💡 You can scan and pay right now, or download the QR code above to pay anytime before delivery.
+            </Text>
+          </View>
+
           <View style={styles.printActionRow}>
             <TouchableOpacity
               style={styles.printButton}
@@ -215,6 +529,14 @@ const OrderConfirmationScreen = ({ navigation, route }) => {
       <PrinterSettingsModal
         visible={showPrinterSettings}
         onClose={() => setShowPrinterSettings(false)}
+      />
+
+      <FullScreenImageViewer
+        visible={isQrViewerVisible}
+        mediaList={qrImageSource ? [{ id: 'order-qr', uri: qrImageSource, title: `Order #${orderNumber} Payment QR`, subtitle: `Bill Total: ₹${totalAmount.toFixed(2)}` }] : []}
+        initialIndex={0}
+        onClose={() => setIsQrViewerVisible(false)}
+        title={`Order #${orderNumber} Payment QR`}
       />
     </View>
   );
@@ -455,6 +777,204 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 14,
     fontWeight: '700',
+  },
+  dynamicQrCard: {
+    width: '100%',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    borderWidth: 1.5,
+    borderColor: '#E2E8F0',
+    padding: 16,
+    marginVertical: 14,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06,
+    shadowRadius: 8,
+    elevation: 3,
+  },
+  dynamicQrHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  qrHeaderIconCircle: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: '#EFF6FF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 10,
+  },
+  dynamicQrTitle: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: '#0F172A',
+  },
+  dynamicQrSubtitle: {
+    fontSize: 11,
+    color: '#64748B',
+    marginTop: 1,
+  },
+  liveTag: {
+    backgroundColor: '#ECFDF5',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#A7F3D0',
+  },
+  liveTagText: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: '#059669',
+  },
+  qrImageBox: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#F8FAFC',
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    paddingVertical: 16,
+    paddingHorizontal: 12,
+    marginBottom: 12,
+  },
+  qrLoadingBox: {
+    height: 200,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  qrLoadingText: {
+    marginTop: 10,
+    fontSize: 13,
+    color: '#64748B',
+  },
+  qrTouchable: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  qrImg: {
+    width: 210,
+    height: 210,
+    borderRadius: 8,
+    backgroundColor: '#FFFFFF',
+  },
+  qrAmountOverlay: {
+    marginTop: 10,
+    backgroundColor: '#0F172A',
+    paddingHorizontal: 14,
+    paddingVertical: 5,
+    borderRadius: 12,
+  },
+  qrAmountOverlayText: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: '#FFFFFF',
+    letterSpacing: 0.4,
+  },
+  upiCopyRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#F1F5F9',
+    borderRadius: 10,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    marginBottom: 12,
+  },
+  upiCopyText: {
+    fontSize: 12,
+    color: '#475569',
+  },
+  copyUpiBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    paddingVertical: 4,
+    paddingHorizontal: 10,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#CBD5E1',
+    marginLeft: 8,
+  },
+  copyUpiBtnSuccess: {
+    borderColor: '#86EFAC',
+    backgroundColor: '#F0FDF4',
+  },
+  copyUpiBtnText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#007AFF',
+  },
+  copyUpiBtnTextSuccess: {
+    color: '#16A34A',
+  },
+  downloadQrHighlightBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#059669', // Emerald highlight
+    borderRadius: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    marginBottom: 12,
+    borderWidth: 1.5,
+    borderColor: '#047857',
+    shadowColor: '#059669',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.28,
+    shadowRadius: 5,
+    elevation: 4,
+  },
+  downloadIconBadge: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: 'rgba(255, 255, 255, 0.22)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 10,
+  },
+  downloadQrTextContainer: {
+    flex: 1,
+  },
+  downloadQrBtnText: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: '#FFFFFF',
+    letterSpacing: 0.3,
+  },
+  downloadQrBtnSubText: {
+    fontSize: 11,
+    color: '#D1FAE5',
+    marginTop: 2,
+    fontWeight: '500',
+  },
+  quickPayAppsRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: 6,
+    marginBottom: 10,
+  },
+  quickPayAppBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 8,
+    borderRadius: 8,
+    borderWidth: 1,
+  },
+  quickPayAppText: {
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  qrHelpNote: {
+    fontSize: 11,
+    color: '#64748B',
+    textAlign: 'center',
+    lineHeight: 16,
+    fontStyle: 'italic',
   },
 });
 

@@ -18,6 +18,7 @@ import {
 } from 'react-native';
 import { Video, ResizeMode } from 'expo-av';
 import { FontAwesome as Icon } from '@expo/vector-icons';
+import { downloadQrCodeImage } from '../utils/qrDownloadUtils';
 
 /**
  * Universal Full-Screen Media & Image Viewer
@@ -494,6 +495,26 @@ const FullScreenImageViewer = ({
                 </TouchableOpacity>
               )}
 
+              {/* Download Image / QR Code to Device Button */}
+              {currentMedia?.uri ? (
+                <TouchableOpacity
+                  style={[styles.actionButton, styles.downloadActionButton]}
+                  onPress={async () => {
+                    const isQr =
+                      (activeTitle || '').toLowerCase().includes('qr') ||
+                      (currentMedia?.id || '').toLowerCase().includes('qr');
+                    const fileName = isQr
+                      ? (activeTitle ? activeTitle.replace(/[^a-zA-Z0-9_-]/g, '_') : 'Payment-QR-Code')
+                      : 'Image-Download';
+                    await downloadQrCodeImage(currentMedia.uri, fileName);
+                  }}
+                  activeOpacity={0.75}
+                  accessibilityLabel="Download image or QR code to device"
+                >
+                  <Icon name="download" size={15} color="#10B981" />
+                </TouchableOpacity>
+              ) : null}
+
               {/* Close Button */}
               <TouchableOpacity
                 style={styles.closeButton}
@@ -747,6 +768,11 @@ const styles = StyleSheet.create({
   },
   actionButtonActive: {
     backgroundColor: '#0284C7',
+  },
+  downloadActionButton: {
+    backgroundColor: 'rgba(16, 185, 129, 0.25)',
+    borderWidth: 1,
+    borderColor: '#10B981',
   },
   zoomButtonText: {
     color: '#FFFFFF',
