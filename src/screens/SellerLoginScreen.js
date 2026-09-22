@@ -289,6 +289,13 @@ export default function SellerLoginScreen({ navigation, route }) {
             </TouchableOpacity>
           </View>
 
+          <View style={[styles.signupContainer, { marginTop: 14 }]}>
+            <Text style={styles.signupText}>Are you store staff or cashier? </Text>
+            <TouchableOpacity onPress={() => navigation.navigate('StaffLogin')}>
+              <Text style={[styles.signupLink, { color: '#10B981', fontWeight: '700' }]}>Staff Login</Text>
+            </TouchableOpacity>
+          </View>
+
         </View>
       </ScrollView>
       <View style={styles.footer}>

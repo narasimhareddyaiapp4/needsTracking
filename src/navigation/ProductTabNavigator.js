@@ -144,10 +144,26 @@ function ProductTabNavigator({ route }) {
   const role = contextRole || userMetadata?.role || route.params?.role || 'seller';
   const customerId = userMetadata?.customerId || route.params?.customerId;
   const isBuyer = role === 'customer' || role === 'buyer';
+  const isEmployee = role === 'seller_employee';
+  const effectiveSellerId = route.params?.sellerId || (isEmployee ? null : userId);
+  const permissions = route.params?.permissions || {};
+  const employeeId = route.params?.employeeId;
+  const employeeName = route.params?.employeeName;
+  const employeeDesignation = route.params?.employeeDesignation;
+
+  const defaultTab = isBuyer
+    ? 'CatalogTab'
+    : isEmployee
+    ? permissions.can_pos_bill !== false
+      ? 'CatalogTab'
+      : permissions.can_manage_orders !== false
+      ? 'OrdersTab'
+      : 'InventoryTab'
+    : 'ProductsTab';
 
   return (
     <Tab.Navigator
-      initialRouteName={isBuyer ? 'CatalogTab' : 'ProductsTab'}
+      initialRouteName={defaultTab}
       screenOptions={({ route }) => ({
         tabBarIcon: ({ focused, color, size }) => {
           let iconName;
@@ -229,59 +245,134 @@ function ProductTabNavigator({ route }) {
           />
         </>
       ) : (
-        // ===== SELLER / ADMIN TABS =====
+        // ===== SELLER & SELLER EMPLOYEE TABS =====
         <>
-          <Tab.Screen
-            name="CatalogTab"
-            component={CatalogStackNavigator}
-            options={{
-              title: 'Catalog',
-              tabBarBadge: cartItemCount > 0 ? cartItemCount : undefined,
-              tabBarBadgeStyle: { backgroundColor: '#10B981', color: '#FFFFFF', fontSize: 10 },
-            }}
-            initialParams={{ session, userId, sellerId: userId, customerId }}
-          />
-          <Tab.Screen
-            name="ProductsTab"
-            component={ProductScreen}
-            options={{ title: 'Products' }}
-            initialParams={{ session, userId, customerId }}
-          />
-          <Tab.Screen
-            name="OrdersTab"
-            component={OrdersStackNavigator}
-            options={{ title: 'Orders' }}
-            initialParams={{ session, userId, customerId }}
-          />
-          <Tab.Screen
-            name="ReportsTab"
-            component={SellerSalesReportScreen}
-            options={{ title: 'Reports' }}
-            initialParams={{ session, userId, sellerId: userId, customerId }}
-          />
-          <Tab.Screen
-            name="InventoryTab"
-            component={InventoryScreen}
-            options={{ title: 'Inventory' }}
-            initialParams={{ session, userId, customerId }}
-          />
-          <Tab.Screen
-            name="DamageTab"
-            component={CustomerDamageScreen}
-            options={{ title: 'Damage' }}
-            initialParams={{ session, userId, customerId }}
-          />
-          <Tab.Screen
-            name="MapTab"
-            component={CustomerMapScreen}
-            options={{ title: 'Map' }}
-            initialParams={{ session, userId, customerId }}
-          />
+          {(!isEmployee || permissions.can_pos_bill !== false) && (
+            <Tab.Screen
+              name="CatalogTab"
+              component={CatalogStackNavigator}
+              options={{
+                title: isEmployee ? 'POS Billing' : 'Catalog',
+                tabBarBadge: cartItemCount > 0 ? cartItemCount : undefined,
+                tabBarBadgeStyle: { backgroundColor: '#10B981', color: '#FFFFFF', fontSize: 10 },
+              }}
+              initialParams={{
+                session,
+                userId,
+                sellerId: effectiveSellerId || userId,
+                customerId,
+                employeeId,
+                employeeName,
+                isEmployee,
+              }}
+            />
+          )}
+
+          {(!isEmployee || permissions.can_manage_products === true) && (
+            <Tab.Screen
+              name="ProductsTab"
+              component={ProductScreen}
+              options={{ title: 'Products' }}
+              initialParams={{
+                session,
+                userId: effectiveSellerId || userId,
+                sellerId: effectiveSellerId || userId,
+                customerId,
+                employeeId,
+                isEmployee,
+              }}
+            />
+          )}
+
+          {(!isEmployee || permissions.can_manage_orders !== false) && (
+            <Tab.Screen
+              name="OrdersTab"
+              component={OrdersStackNavigator}
+              options={{ title: 'Orders' }}
+              initialParams={{
+                session,
+                userId: effectiveSellerId || userId,
+                sellerId: effectiveSellerId || userId,
+                customerId,
+                employeeId,
+                employeeName,
+                isEmployee,
+              }}
+            />
+          )}
+
+          {(!isEmployee || permissions.can_view_reports === true) && (
+            <Tab.Screen
+              name="ReportsTab"
+              component={SellerSalesReportScreen}
+              options={{ title: 'Reports' }}
+              initialParams={{
+                session,
+                userId: effectiveSellerId || userId,
+                sellerId: effectiveSellerId || userId,
+                customerId,
+                employeeId,
+                isEmployee,
+              }}
+            />
+          )}
+
+          {(!isEmployee || permissions.can_manage_inventory === true) && (
+            <Tab.Screen
+              name="InventoryTab"
+              component={InventoryScreen}
+              options={{ title: 'Inventory' }}
+              initialParams={{
+                session,
+                userId: effectiveSellerId || userId,
+                sellerId: effectiveSellerId || userId,
+                customerId,
+                employeeId,
+                isEmployee,
+              }}
+            />
+          )}
+
+          {(!isEmployee || permissions.can_manage_inventory === true) && (
+            <Tab.Screen
+              name="DamageTab"
+              component={CustomerDamageScreen}
+              options={{ title: 'Damage' }}
+              initialParams={{
+                session,
+                userId: effectiveSellerId || userId,
+                sellerId: effectiveSellerId || userId,
+                customerId,
+                employeeId,
+                isEmployee,
+              }}
+            />
+          )}
+
+          {!isEmployee && (
+            <Tab.Screen
+              name="MapTab"
+              component={CustomerMapScreen}
+              options={{ title: 'Map' }}
+              initialParams={{ session, userId, customerId }}
+            />
+          )}
+
           <Tab.Screen
             name="ProfileTab"
             component={ProfileScreen}
-            options={{ title: 'Profile' }}
-            initialParams={{ session, userId, customerId }}
+            options={{ title: isEmployee ? 'Staff Profile' : 'Profile' }}
+            initialParams={{
+              session,
+              userId,
+              sellerId: effectiveSellerId || userId,
+              customerId,
+              employeeId,
+              employeeName,
+              employeeDesignation,
+              isEmployee,
+              role,
+            }}
           />
         </>
       )}

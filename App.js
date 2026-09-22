@@ -78,12 +78,15 @@ import CustomerDamageScreen from './src/screens/CustomerDamageScreen';
 import CatalogManagementScreen from './src/screens/CatalogManagementScreen';
 import ProductDetailScreen from './src/screens/ProductDetailScreen';
 import SellerSalesReportScreen from './src/screens/SellerSalesReportScreen';
+import StaffLoginScreen from './src/screens/StaffLoginScreen';
+import SellerEmployeesScreen from './src/screens/SellerEmployeesScreen';
 
 // Import custom navigators
 import ProductTabNavigator from './src/navigation/ProductTabNavigator';
 
 // Import services & context
 import { supabase, ensureUserProfile } from './src/services/supabase';
+import { resolveEmployeeSession } from './src/services/employeeService';
 import { getPreferredStore, setPreferredStore } from './src/services/localStorageService';
 import { CartProvider } from './src/context/CartContext';
 import { ThemeProvider, useTheme } from './src/context/ThemeContext';
@@ -116,9 +119,25 @@ function AppInner() {
           'BuyerAuth',
           'DeliveryManagerLogin',
           'DeliveryManagerSignup',
+          'StaffLogin',
         ];
 
         if (!currentRoute || rootAuthScreens.includes(currentRoute)) {
+          // Check if the user is a registered store staff/employee
+          const employee = await resolveEmployeeSession(user);
+          if (employee) {
+            navigationRef.current?.navigate('ProductTabs', {
+              session: currentSession,
+              role: 'seller_employee',
+              sellerId: employee.seller_id,
+              employeeId: employee.id,
+              employeeName: employee.name,
+              employeeDesignation: employee.designation,
+              permissions: employee.permissions,
+            });
+            return;
+          }
+
           if (role === 'delivery_manager') {
             navigationRef.current?.navigate('DeliveryManagerDashboard');
           } else if (role === 'seller' || role === 'admin' || role === 'superadmin') {
@@ -582,6 +601,8 @@ function AppInner() {
             <Stack.Screen name="Login" component={LoginScreen} />
             <Stack.Screen name="Signup" component={SignupScreen} />
             <Stack.Screen name="SellerLogin" component={SellerLoginScreen} />
+            <Stack.Screen name="StaffLogin" component={StaffLoginScreen} />
+            <Stack.Screen name="SellerEmployees" component={SellerEmployeesScreen} />
             <Stack.Screen name="ProductMapScreen" component={ProductMapScreen} />
             <Stack.Screen name="DeliveryManagerLogin" component={DeliveryManagerLoginScreen} />
             <Stack.Screen name="DeliveryManagerDashboard" component={DeliveryManagerDashboard} />

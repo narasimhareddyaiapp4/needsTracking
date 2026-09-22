@@ -1737,8 +1737,9 @@ const ProfileScreen = ({ navigation, route }) => {
   ).toLowerCase().trim();
   const isDelivery = userRole === 'delivery_manager' || userRole === 'delivery_partner';
   const isAdmin = userRole === 'admin' || userRole === 'superadmin' || userRole === 'appadmin' || userRole === 'app_admin';
-  const isSeller = !isDelivery && (userRole === 'seller' || isAdmin || (sellerProducts && sellerProducts.length > 0));
-  const isBuyer = !isAdmin && !isSeller && !isDelivery;
+  const isEmployee = userRole === 'seller_employee' || route.params?.isEmployee;
+  const isSeller = !isEmployee && !isDelivery && (userRole === 'seller' || isAdmin || (sellerProducts && sellerProducts.length > 0));
+  const isBuyer = !isAdmin && !isSeller && !isDelivery && !isEmployee;
 
   return (
     <View style={[styles.rootWrapper, { backgroundColor: colors.background }]}>
@@ -1756,28 +1757,30 @@ const ProfileScreen = ({ navigation, route }) => {
           )}
           <Text style={[styles.title, { color: colors.text }]}>Profile</Text>
         </View>
-        {(profile?.role || profile?.user_type || isAdmin || isDelivery || isSeller) && (
+        {(profile?.role || profile?.user_type || isAdmin || isDelivery || isSeller || isEmployee) && (
           <View style={[
             styles.profileRoleBadge,
             isAdmin ? styles.roleBadgeAdmin :
+            isEmployee ? { backgroundColor: '#ECFDF5', borderColor: '#A7F3D0' } :
             isSeller ? styles.roleBadgeSeller :
             isDelivery ? styles.roleBadgeDelivery :
             styles.roleBadgeCustomer
           ]}>
             <Icon
-              name={isAdmin ? 'shield' : isSeller ? 'home' : isDelivery ? 'truck' : 'user'}
+              name={isAdmin ? 'shield' : isEmployee ? 'id-badge' : isSeller ? 'home' : isDelivery ? 'truck' : 'user'}
               size={12}
-              color={isAdmin ? '#D97706' : isSeller ? '#059669' : isDelivery ? '#7C3AED' : '#0284C7'}
+              color={isAdmin ? '#D97706' : isEmployee ? '#059669' : isSeller ? '#059669' : isDelivery ? '#7C3AED' : '#0284C7'}
               style={{ marginRight: 5 }}
             />
             <Text style={[
               styles.profileRoleBadgeText,
               isAdmin ? styles.roleBadgeTextAdmin :
+              isEmployee ? { color: '#065F46', fontWeight: '700' } :
               isSeller ? styles.roleBadgeTextSeller :
               isDelivery ? styles.roleBadgeTextDelivery :
               styles.roleBadgeTextCustomer
             ]}>
-              {isAdmin ? (userRole === 'superadmin' ? 'Superadmin' : 'App Admin') : isSeller ? 'Seller Account' : isDelivery ? 'Delivery Partner' : 'Customer / Buyer'}
+              {isAdmin ? (userRole === 'superadmin' ? 'Superadmin' : 'App Admin') : isEmployee ? `Staff: ${route.params?.employeeName || 'Staff Member'} (${route.params?.employeeDesignation || 'Cashier'})` : isSeller ? 'Seller Account' : isDelivery ? 'Delivery Partner' : 'Customer / Buyer'}
             </Text>
           </View>
         )}
@@ -2024,6 +2027,31 @@ const ProfileScreen = ({ navigation, route }) => {
               </View>
             </View>
             <Icon name="chevron-right" size={14} color="#94A3B8" />
+          </TouchableOpacity>
+
+          {/* Quick shortcut to Store Staff & Employees */}
+          <TouchableOpacity
+            style={[styles.salesReportProfileBtn, { marginTop: 10, borderColor: '#BAE6FD', backgroundColor: '#F0F9FF' }]}
+            activeOpacity={0.8}
+            onPress={() => {
+              navigation.navigate('SellerEmployees', {
+                sellerId: user?.id,
+                sellerName: profile?.business_name || profile?.full_name,
+              });
+            }}
+          >
+            <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
+              <View style={[styles.salesReportProfileIcon, { backgroundColor: '#E0F2FE' }]}>
+                <Icon name="users" size={16} color="#0284C7" />
+              </View>
+              <View style={{ marginLeft: 10, flex: 1 }}>
+                <Text style={[styles.salesReportProfileTitle, { color: '#0369A1' }]}>Store Staff & Employees</Text>
+                <Text style={styles.salesReportProfileSub}>
+                  Manage cashiers, order handlers, PINs & operational permissions
+                </Text>
+              </View>
+            </View>
+            <Icon name="chevron-right" size={14} color="#0284C7" />
           </TouchableOpacity>
         </View>
       )}
