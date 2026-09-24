@@ -2,6 +2,7 @@ import React, { createContext, useState, useEffect, useContext } from 'react';
 import { supabase } from '../services/supabase';
 import { Alert } from 'react-native';
 import { getCart, updateCartItem, removeCartItem } from '../services/supabase'; // Assuming these are in supabase.js
+import { getActiveEmployeeSession } from '../services/employeeService';
 
 const CartContext = createContext();
 
@@ -28,7 +29,16 @@ export const CartProvider = ({ children }) => {
               .select('role')
               .eq('id', user.id)
               .maybeSingle();
-            if (isMounted) setRole(profile?.role || null);
+
+            let detectedRole = profile?.role || null;
+            try {
+              const emp = await getActiveEmployeeSession();
+              if (emp) {
+                detectedRole = 'seller_employee';
+              }
+            } catch (_) {}
+
+            if (isMounted) setRole(detectedRole);
           } catch (profileErr) {
             console.warn('Profile fetch error in CartContext:', profileErr);
           }

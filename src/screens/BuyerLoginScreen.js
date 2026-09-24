@@ -13,6 +13,8 @@ import {
 } from 'react-native';
 import { supabase, signInWithGoogle, addToCart, getAuthRedirectUrl } from '../services/supabase';
 import { getGuestCart, clearGuestCart, getPreferredStore } from '../services/localStorageService';
+import { resolveEmployeeSession } from '../services/employeeService';
+import { StackActions } from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import FontAwesome from 'react-native-vector-icons/FontAwesome';
 import Constants from 'expo-constants';
@@ -56,7 +58,7 @@ export default function BuyerLoginScreen({ navigation, route }) {
     return () => { isMounted = false; };
   }, []);
 
-  const navigateAfterAuth = (user) => {
+  const navigateAfterAuth = async (user) => {
     if (onAuthSuccess) {
       try {
         onAuthSuccess(user);
@@ -64,6 +66,27 @@ export default function BuyerLoginScreen({ navigation, route }) {
         console.warn('onAuthSuccess error:', e);
       }
     }
+
+    // Check if user is a registered staff member/employee
+    try {
+      const employee = await resolveEmployeeSession(user);
+      if (employee) {
+        const { data: { session } = {} } = await supabase.auth.getSession();
+        navigation.dispatch(
+          StackActions.replace('ProductTabs', {
+            session,
+            role: 'seller_employee',
+            sellerId: employee.seller_id,
+            employeeId: employee.id,
+            employeeName: employee.name,
+            employeeDesignation: employee.designation,
+            permissions: employee.permissions,
+          })
+        );
+        return;
+      }
+    } catch (_) {}
+
     if (redirectTo) {
       navigation.navigate(redirectTo, redirectParams || {});
     } else if (preferredStore?.sellerId || route.params?.sellerId) {

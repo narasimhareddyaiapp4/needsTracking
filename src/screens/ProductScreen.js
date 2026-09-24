@@ -56,14 +56,14 @@ const ProductScreen = ({ route, navigation }) => {
         return;
       }
 
-      const id = user.id;
+      const id = route?.params?.sellerId || user.id;
       setUserId(id);
-      console.log('ProductScreen: User ID set:', id);
+      console.log('ProductScreen: User/Seller ID set:', id);
       fetchProducts(id);
     };
 
     initSession();
-  }, [initialSession]);
+  }, [initialSession, route?.params?.sellerId]);
   
   const [loading, setLoading] = useState(false);
   const [products, setProducts] = useState([]); // Stores fetched products

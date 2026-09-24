@@ -12,6 +12,7 @@ import {
 } from 'react-native';
 import { supabase, signInWithGoogle, getAuthRedirectUrl } from '../services/supabase';
 import { getPreferredStore } from '../services/localStorageService';
+import { resolveEmployeeSession } from '../services/employeeService';
 import { StackActions } from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import FontAwesome from 'react-native-vector-icons/FontAwesome';
@@ -39,10 +40,30 @@ export default function LoginScreen({ navigation, route }) {
     return () => { isMounted = false; };
   }, []);
 
-  const navigateAfterAuth = (user, session) => {
+  const navigateAfterAuth = async (user, session) => {
     if (onAuthSuccess) {
       try { onAuthSuccess(user); } catch (e) {}
     }
+
+    // Check if user is a registered staff member/employee
+    try {
+      const employee = await resolveEmployeeSession(user);
+      if (employee) {
+        navigation.dispatch(
+          StackActions.replace('ProductTabs', {
+            session,
+            role: 'seller_employee',
+            sellerId: employee.seller_id,
+            employeeId: employee.id,
+            employeeName: employee.name,
+            employeeDesignation: employee.designation,
+            permissions: employee.permissions,
+          })
+        );
+        return;
+      }
+    } catch (_) {}
+
     const targetSellerId = preferredStore?.sellerId || route.params?.sellerId;
     const targetSellerName = preferredStore?.sellerName || route.params?.sellerName;
     if (targetSellerId) {

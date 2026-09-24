@@ -58,6 +58,7 @@ import {
 import StoreNavigationFooter from '../components/StoreNavigationFooter';
 import FullScreenImageViewer from '../components/FullScreenImageViewer';
 import { useTheme } from '../context/ThemeContext';
+import { getActiveEmployeeSession } from '../services/employeeService';
 import { decodeQrFromImage, parseUpiString, normalizeUpiId, isGenericQrName } from '../services/qrScanService';
 
 const MAX_IMAGES = 3;

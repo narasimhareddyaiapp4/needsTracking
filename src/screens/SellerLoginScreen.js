@@ -11,6 +11,7 @@ import {
   ScrollView,
 } from 'react-native';
 import { supabase, signInWithGoogle, getAuthRedirectUrl, isUserAdminOrSuperadmin } from '../services/supabase';
+import { resolveEmployeeSession } from '../services/employeeService';
 import { StackActions } from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import FontAwesome from 'react-native-vector-icons/FontAwesome';
@@ -32,6 +33,26 @@ export default function SellerLoginScreen({ navigation, route }) {
       }
       const res = await signInWithGoogle('seller');
       if (res.success && res.user) {
+        // 1. Check if user is a registered staff member/employee
+        const employee = await resolveEmployeeSession(res.user);
+        if (employee) {
+          if (onAuthSuccess) {
+            try { onAuthSuccess(res.user); } catch (_) {}
+          }
+          navigation.dispatch(
+            StackActions.replace('ProductTabs', {
+              session: res.session,
+              role: 'seller_employee',
+              sellerId: employee.seller_id,
+              employeeId: employee.id,
+              employeeName: employee.name,
+              employeeDesignation: employee.designation,
+              permissions: employee.permissions,
+            })
+          );
+          return;
+        }
+
         const { data: existingProfile } = await supabase
           .from('profiles')
           .select('id, role')
@@ -111,6 +132,26 @@ export default function SellerLoginScreen({ navigation, route }) {
         Alert.alert('Login Error', error.message);
       } else {
         console.log('Login successful:', data.user);
+
+        // 1. Check if user is a registered staff member/employee
+        const employee = await resolveEmployeeSession(data.user);
+        if (employee) {
+          if (onAuthSuccess) {
+            try { onAuthSuccess(data.user); } catch (_) {}
+          }
+          navigation.dispatch(
+            StackActions.replace('ProductTabs', {
+              session: data.session,
+              role: 'seller_employee',
+              sellerId: employee.seller_id,
+              employeeId: employee.id,
+              employeeName: employee.name,
+              employeeDesignation: employee.designation,
+              permissions: employee.permissions,
+            })
+          );
+          return;
+        }
 
         let { data: profileData, error: profileError } = await supabase
           .from('profiles')

@@ -18,6 +18,7 @@ import * as Clipboard from 'expo-clipboard';
 import { getOrders, deleteOrder, updateOrderPaymentStatus, supabase, getActiveQrCode } from '../services/supabase';
 import { printReceipt, extractOrderNumbers, announceOrderPrint } from '../services/printerService';
 import { getGuestOrderIds } from '../services/localStorageService';
+import { getActiveEmployeeSession } from '../services/employeeService';
 import Icon from 'react-native-vector-icons/FontAwesome';
 import UniversalDateTimePicker from '../components/UniversalDateTimePicker';
 import { showAlert } from '../utils/alertUtils';
@@ -179,13 +180,34 @@ const OrderListScreen = ({ navigation, route }) => {
     } catch (_) {}
   };
 
+  const routeIsEmployee = route?.params?.isEmployee || route?.params?.role === 'seller_employee';
+  const routePermissions = route?.params?.permissions;
+  const [employeeSession, setEmployeeSession] = useState(null);
+
+  useEffect(() => {
+    let isMounted = true;
+    (async () => {
+      try {
+        const emp = await getActiveEmployeeSession();
+        if (isMounted && emp) setEmployeeSession(emp);
+      } catch (_) {}
+    })();
+    return () => { isMounted = false; };
+  }, []);
+
+  const isEmployee = Boolean(routeIsEmployee || employeeSession);
+  const permissions = (routePermissions && typeof routePermissions === 'object')
+    ? routePermissions
+    : (employeeSession?.permissions || {});
+  const effectiveSellerId = sellerId || employeeSession?.seller_id;
+
   useEffect(() => {
     if (contextRole) {
       setUserRole(contextRole);
     }
   }, [contextRole]);
 
-  const canManageOrders = userRole === 'seller' || userRole === 'admin' || userRole === 'superadmin';
+  const canManageOrders = userRole === 'seller' || userRole === 'admin' || userRole === 'superadmin' || (isEmployee && permissions.can_manage_orders !== false);
 
   const fetchOrders = useCallback(async (isSilent = false) => {
     // Only show full loading spinner on initial cold fetch when no orders are loaded yet
@@ -252,7 +274,7 @@ const OrderListScreen = ({ navigation, route }) => {
         }
       } else {
         // Authenticated user
-        let effectiveRole = contextRole || userRole;
+        let effectiveRole = isEmployee ? 'seller_employee' : (contextRole || userRole);
         if (!effectiveRole) {
           const { data: prof } = await supabase
             .from('profiles')
@@ -266,7 +288,11 @@ const OrderListScreen = ({ navigation, route }) => {
         const isSeller = effectiveRole === 'seller';
         const isAdmin = effectiveRole === 'admin' || effectiveRole === 'superadmin';
 
-        if (isSeller) {
+        if (isEmployee) {
+          // Store staff / cashier views employer store's orders
+          const targetStoreId = effectiveSellerId || route?.params?.sellerId || user.id;
+          fetchedOrders = await getOrders(targetStoreId, { role: 'seller', isSeller: true });
+        } else if (isSeller) {
           // Seller views all orders received by their store
           fetchedOrders = await getOrders(user.id, { role: 'seller', isSeller: true });
         } else if (isAdmin) {

@@ -1,9 +1,10 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createStackNavigator } from '@react-navigation/stack';
 import { FontAwesome as Icon } from '@expo/vector-icons';
 import { useCart } from '../context/CartContext';
 import { useTheme } from '../context/ThemeContext';
+import { getActiveEmployeeSession, resolveEmployeeSession } from '../services/employeeService';
 
 // Import the screens that will be part of the tabs
 import ProductScreen from '../screens/ProductScreen';
@@ -141,15 +142,55 @@ function ProductTabNavigator({ route }) {
   const user = session?.user || session;
   const userId = user?.id;
   const userMetadata = user?.user_metadata || session?.user_metadata;
-  const role = contextRole || userMetadata?.role || route.params?.role || 'seller';
+
+  // Track employee info with fallback to async session resolution
+  const [employeeInfo, setEmployeeInfo] = useState({
+    isEmployee: route.params?.role === 'seller_employee' || route.params?.isEmployee === true,
+    sellerId: route.params?.sellerId || null,
+    employeeId: route.params?.employeeId || null,
+    employeeName: route.params?.employeeName || null,
+    employeeDesignation: route.params?.employeeDesignation || null,
+    permissions: route.params?.permissions || null,
+  });
+
+  useEffect(() => {
+    let isMounted = true;
+    const checkEmployee = async () => {
+      try {
+        let emp = await getActiveEmployeeSession();
+        if (!emp && user) {
+          emp = await resolveEmployeeSession(user);
+        }
+        if (isMounted && emp) {
+          setEmployeeInfo({
+            isEmployee: true,
+            sellerId: emp.seller_id,
+            employeeId: emp.id,
+            employeeName: emp.name,
+            employeeDesignation: emp.designation,
+            permissions: emp.permissions,
+          });
+        }
+      } catch (err) {
+        console.warn('Error checking employee session in ProductTabNavigator:', err);
+      }
+    };
+    checkEmployee();
+    return () => { isMounted = false; };
+  }, [user]);
+
+  // Determine role: If staff employee, NEVER allow contextRole or userMetadata to override 'seller_employee'!
+  const isEmployee = employeeInfo.isEmployee || route.params?.role === 'seller_employee' || route.params?.isEmployee === true;
+  const role = isEmployee
+    ? 'seller_employee'
+    : (route.params?.role || contextRole || userMetadata?.role || 'seller');
   const customerId = userMetadata?.customerId || route.params?.customerId;
   const isBuyer = role === 'customer' || role === 'buyer';
-  const isEmployee = role === 'seller_employee';
-  const effectiveSellerId = route.params?.sellerId || (isEmployee ? null : userId);
-  const permissions = route.params?.permissions || {};
-  const employeeId = route.params?.employeeId;
-  const employeeName = route.params?.employeeName;
-  const employeeDesignation = route.params?.employeeDesignation;
+  const effectiveSellerId = employeeInfo.sellerId || route.params?.sellerId || (isEmployee ? null : userId);
+  const permissions = employeeInfo.permissions || route.params?.permissions || {};
+  const employeeId = employeeInfo.employeeId || route.params?.employeeId;
+  const employeeName = employeeInfo.employeeName || route.params?.employeeName;
+  const employeeDesignation = employeeInfo.employeeDesignation || route.params?.employeeDesignation;
 
   const defaultTab = isBuyer
     ? 'CatalogTab'
@@ -258,12 +299,14 @@ function ProductTabNavigator({ route }) {
               }}
               initialParams={{
                 session,
-                userId,
+                userId: effectiveSellerId || userId,
                 sellerId: effectiveSellerId || userId,
                 customerId,
                 employeeId,
                 employeeName,
+                employeeDesignation,
                 isEmployee,
+                permissions,
               }}
             />
           )}
@@ -279,7 +322,10 @@ function ProductTabNavigator({ route }) {
                 sellerId: effectiveSellerId || userId,
                 customerId,
                 employeeId,
+                employeeName,
+                employeeDesignation,
                 isEmployee,
+                permissions,
               }}
             />
           )}
@@ -296,7 +342,9 @@ function ProductTabNavigator({ route }) {
                 customerId,
                 employeeId,
                 employeeName,
+                employeeDesignation,
                 isEmployee,
+                permissions,
               }}
             />
           )}
@@ -312,7 +360,10 @@ function ProductTabNavigator({ route }) {
                 sellerId: effectiveSellerId || userId,
                 customerId,
                 employeeId,
+                employeeName,
+                employeeDesignation,
                 isEmployee,
+                permissions,
               }}
             />
           )}
@@ -328,7 +379,10 @@ function ProductTabNavigator({ route }) {
                 sellerId: effectiveSellerId || userId,
                 customerId,
                 employeeId,
+                employeeName,
+                employeeDesignation,
                 isEmployee,
+                permissions,
               }}
             />
           )}
@@ -344,7 +398,10 @@ function ProductTabNavigator({ route }) {
                 sellerId: effectiveSellerId || userId,
                 customerId,
                 employeeId,
+                employeeName,
+                employeeDesignation,
                 isEmployee,
+                permissions,
               }}
             />
           )}
@@ -371,6 +428,7 @@ function ProductTabNavigator({ route }) {
               employeeName,
               employeeDesignation,
               isEmployee,
+              permissions,
               role,
             }}
           />
