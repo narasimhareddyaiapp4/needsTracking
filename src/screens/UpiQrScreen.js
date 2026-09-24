@@ -16,7 +16,7 @@ import * as Clipboard from 'expo-clipboard';
 import { supabase, getActiveQrCode, updateOrderStatus, extractMerchantUpi } from '../services/supabase';
 import StoreNavigationFooter from '../components/StoreNavigationFooter';
 import FullScreenImageViewer from '../components/FullScreenImageViewer';
-import { normalizeUpiId, isGenericQrName, resolveUploadedQrDetails, buildUpiPaymentUri } from '../services/qrScanService';
+import { normalizeUpiId, isGenericQrName, resolveUploadedQrDetails, buildUpiPaymentUri, formatUpiTransactionNote } from '../services/qrScanService';
 
 const UpiQrScreen = ({ navigation, route }) => {
   const { cart, totalAmount: passedAmount, shippingAddress, order, sellerId: paramSellerId, sellerName: paramSellerName, customerId: paramCustomerId } = route?.params || {};
@@ -139,13 +139,23 @@ const UpiQrScreen = ({ navigation, route }) => {
   }, [order, cart]);
 
   const activeVpa = payeeUpiId || 'store@okaxis';
-  const orderRef = order?.order_number || (order?.id ? order.id.substring(0, 8) : 'Order');
+  const paymentRefCode =
+    order?.payment_reference ||
+    (typeof order?.shipping_address === 'object' ? order?.shipping_address?.payment_reference : null);
+  const upiNote = formatUpiTransactionNote({
+    order,
+    cart,
+    paymentReference: paymentRefCode,
+    uniqueCode: paymentRefCode,
+  });
+
   const dynamicUpiUri = activeVpa
     ? buildUpiPaymentUri({
         upiId: activeVpa,
         payeeName: payeeName || '',
         amount: Number(amount) > 0 ? Number(amount) : undefined,
-        note: 'Bill Order ' + orderRef,
+        note: upiNote,
+        tr: paymentRefCode,
       })
     : '';
   const dynamicQrImageUrl = dynamicUpiUri

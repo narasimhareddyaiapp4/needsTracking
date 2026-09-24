@@ -33,6 +33,7 @@ import {
   decodeQrFromImage,
   parseUpiString,
   resolveUploadedQrDetails,
+  formatUpiTransactionNote,
 } from '../services/qrScanService';
 
 const OrderDetailScreen = ({ navigation, route }) => {
@@ -128,11 +129,24 @@ const OrderDetailScreen = ({ navigation, route }) => {
 
       setSellerUpiId(resolvedUpi);
 
+      const paymentRefCode =
+        extractOrderNumbers(order).paymentReference ||
+        order?.payment_reference ||
+        (typeof order?.shipping_address === 'object' ? order?.shipping_address?.payment_reference : null);
+
+      const note = formatUpiTransactionNote({
+        order,
+        orderNumber,
+        paymentReference: paymentRefCode,
+        uniqueCode: paymentRefCode,
+      });
+
       const uri = buildUpiPaymentUri({
         upiId: resolvedUpi || 'merchant@upi',
         payeeName: qrPayeeName || '',
         amount: totalAmount > 0 ? totalAmount : undefined,
-        note: `Order ${orderNumber}`,
+        note,
+        tr: paymentRefCode,
       });
 
       setDynamicQrUri(uri);

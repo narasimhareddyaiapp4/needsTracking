@@ -5,7 +5,7 @@ import * as Print from 'expo-print';
 import QRCode from 'qrcode';
 import { supabase } from './supabase';
 import { announceOrderPrint } from './speechService';
-import { resolveUploadedQrDetails } from './qrScanService';
+import { resolveUploadedQrDetails, formatUpiTransactionNote, buildUpiPaymentUri } from './qrScanService';
 export { announceOrderPrint };
 
 const PRINTER_STORAGE_KEY = '@printer_config_v1';
@@ -1457,11 +1457,24 @@ export const printReceipt = async (orderDetails, options = {}) => {
 
     if (shouldPrintQr && total > 0) {
       const cleanUpi = sellerUpiId ? sellerUpiId.trim() : null;
-      const pnParam = qrPayeeName ? `&pn=${encodeURIComponent(qrPayeeName)}` : '';
+      const paymentRefCode = extractOrderNumbers(order).paymentReference || order.payment_reference || null;
+      const receiptUpiNote = formatUpiTransactionNote({
+        order,
+        orderNumber,
+        paymentReference: paymentRefCode,
+        uniqueCode: paymentRefCode,
+      });
+
       if (cleanUpi) {
-        dynamicQrText = `upi://pay?pa=${encodeURIComponent(cleanUpi)}${pnParam}&am=${total.toFixed(2)}&cu=INR&tn=Order%20${encodeURIComponent(orderNumber)}`;
+        dynamicQrText = buildUpiPaymentUri({
+          upiId: cleanUpi,
+          payeeName: qrPayeeName,
+          amount: total,
+          note: receiptUpiNote,
+          tr: paymentRefCode,
+        });
       } else if (qrPayeeName) {
-        dynamicQrText = `upi://pay?pn=${encodeURIComponent(qrPayeeName)}&am=${total.toFixed(2)}&cu=INR&tn=Order%20${encodeURIComponent(orderNumber)}`;
+        dynamicQrText = `upi://pay?pn=${encodeURIComponent(qrPayeeName)}&am=${total.toFixed(2)}&cu=INR&tn=${encodeURIComponent(receiptUpiNote)}`;
       }
 
       // 1. Vector SVG for 100% crisp mathematical rendering on thermal & system prints
@@ -1630,7 +1643,7 @@ export const printPreBill = async (cart) => {
  */
 export const printTestReceipt = async () => {
   const config = await getPrinterConfig();
-  const testUpiText = 'upi://pay?pa=teststore@upi&pn=Test%20Store&am=50.00&cu=INR&tn=Test%20Slip';
+  const testUpiText = 'upi://pay?pa=teststore@upi&pn=Test%20Store&am=50.00&cu=INR&tn=Order%20TEST%20100001';
   let dynamicQrSvg = null;
   let dynamicQrUrl = null;
 

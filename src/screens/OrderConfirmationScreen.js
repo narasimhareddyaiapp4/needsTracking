@@ -28,6 +28,7 @@ import {
   decodeQrFromImage,
   parseUpiString,
   resolveUploadedQrDetails,
+  formatUpiTransactionNote,
 } from '../services/qrScanService';
 
 const OrderConfirmationScreen = ({ navigation, route }) => {
@@ -115,11 +116,24 @@ const OrderConfirmationScreen = ({ navigation, route }) => {
       setSellerUpiId(resolvedUpi);
       if (name) setSellerDisplayName(name);
 
+      const paymentRefCode =
+        route?.params?.paymentReference ||
+        order?.payment_reference ||
+        (typeof order?.shipping_address === 'object' ? order?.shipping_address?.payment_reference : null);
+
+      const note = formatUpiTransactionNote({
+        order,
+        orderNumber,
+        paymentReference: paymentRefCode,
+        uniqueCode: paymentRefCode,
+      });
+
       const uri = buildUpiPaymentUri({
         upiId: resolvedUpi || 'merchant@upi',
         payeeName: qrPayeeName || '',
         amount: totalAmount > 0 ? totalAmount : undefined,
-        note: `Order ${orderNumber}`,
+        note,
+        tr: paymentRefCode,
       });
 
       setDynamicQrUri(uri);

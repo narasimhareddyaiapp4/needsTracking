@@ -50,6 +50,7 @@ import {
   normalizeUpiId,
   isGenericQrName,
   resolveUploadedQrDetails,
+  formatUpiTransactionNote,
 } from '../services/qrScanService';
 
 const CheckoutScreen = ({ navigation, route }) => {
@@ -589,11 +590,12 @@ const CheckoutScreen = ({ navigation, route }) => {
   // For dynamic bill QR loading, strictly use payee name from uploaded QR code details ONLY (never profile name)
   const dynamicPayeeName = sellerQrPayeeName || '';
 
-  // Alphanumeric with spaces only - strictly NO '#' character so UPI apps (GPay, PhonePe, Paytm) never fail
-  const cleanCartRef = (cart?.id || '').toString().replace(/[^a-zA-Z0-9]/g, '').slice(-4).toUpperCase();
-  const orderNote = cleanCartRef
-    ? `Order ${cleanCartRef} ${uniquePaymentCode}`
-    : `Order ${uniquePaymentCode}`;
+  // Alphanumeric with spaces only - strictly NO '#' or special characters so UPI apps (GPay, PhonePe, Paytm) never fail
+  const orderNote = formatUpiTransactionNote({
+    cartId: cart?.id,
+    uniqueCode: uniquePaymentCode,
+    fallbackRef: (profile?.id || '').replace(/[^a-zA-Z0-9]/g, '').slice(-4).toUpperCase(),
+  });
 
   // Official UPI Payment URI format (supported across all Indian UPI apps)
   const dynamicUpiUri = activeUpiId

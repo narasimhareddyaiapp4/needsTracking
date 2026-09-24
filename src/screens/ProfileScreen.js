@@ -2496,7 +2496,7 @@ const ProfileScreen = ({ navigation, route }) => {
               onPress={() => {
                 const activeCleanUpi = normalizeUpiId(upiId) || upiId.trim();
                 const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=500x500&data=${encodeURIComponent(
-                  `upi://pay?pa=${encodeURIComponent(activeCleanUpi)}&pn=${encodeURIComponent(name.trim() || 'Store')}&am=100&cu=INR&tn=Order%20Payment`
+                  `upi://pay?pa=${encodeURIComponent(activeCleanUpi)}&pn=${encodeURIComponent(name.trim() || 'Store')}&am=100&cu=INR&tn=Order%20DEMO%20100001`
                 )}`;
                 const combined = [
                   { id: 'dynamic-qr', uri: qrUrl, type: 'image', title: `${name || 'Store'} Dynamic UPI QR Code` },
@@ -2512,7 +2512,7 @@ const ProfileScreen = ({ navigation, route }) => {
               <Image
                 source={{
                   uri: `https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(
-                    `upi://pay?pa=${encodeURIComponent(normalizeUpiId(upiId) || upiId.trim())}&pn=${encodeURIComponent(name.trim() || 'Store')}&am=100&cu=INR&tn=Order%20Payment`
+                    `upi://pay?pa=${encodeURIComponent(normalizeUpiId(upiId) || upiId.trim())}&pn=${encodeURIComponent(name.trim() || 'Store')}&am=100&cu=INR&tn=Order%20DEMO%20100001`
                   )}`,
                 }}
                 style={styles.previewQrImage}
@@ -2537,7 +2537,7 @@ const ProfileScreen = ({ navigation, route }) => {
               onPress={() => {
                 const activeCleanUpi = normalizeUpiId(upiId) || upiId.trim();
                 const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=500x500&data=${encodeURIComponent(
-                  `upi://pay?pa=${encodeURIComponent(activeCleanUpi)}&pn=${encodeURIComponent(name.trim() || 'Store')}&am=100&cu=INR&tn=Order%20Payment`
+                  `upi://pay?pa=${encodeURIComponent(activeCleanUpi)}&pn=${encodeURIComponent(name.trim() || 'Store')}&am=100&cu=INR&tn=Order%20DEMO%20100001`
                 )}`;
                 const combined = [
                   { id: 'custom-qr', uri: upiQrCodeUrl, type: 'image', title: `${name || 'Store'} Uploaded QR Standee` },
