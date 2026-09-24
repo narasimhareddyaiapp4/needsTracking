@@ -5,6 +5,7 @@ import * as Print from 'expo-print';
 import QRCode from 'qrcode';
 import { supabase } from './supabase';
 import { announceOrderPrint } from './speechService';
+import { resolveUploadedQrDetails } from './qrScanService';
 export { announceOrderPrint };
 
 const PRINTER_STORAGE_KEY = '@printer_config_v1';
@@ -1390,6 +1391,7 @@ export const printReceipt = async (orderDetails, options = {}) => {
     // Dynamic Payment QR Code Resolution (Configurable by seller profile & printer settings)
     let shouldPrintQr = config.printDynamicQr !== false;
     let sellerUpiId = order.seller_upi_id || order.upi_id || shippingBilling?.upi_id || null;
+    let qrPayeeName = '';
     let resolvedSellerName = options.storeName || order.seller_name || config.storeName || 'Store';
     const sellerId =
       order.seller_id ||
@@ -1424,20 +1426,26 @@ export const printReceipt = async (orderDetails, options = {}) => {
         console.warn('[PrinterService] Seller profile query notice:', profErr);
       }
 
-      // If UPI ID still missing, check user_qr_codes table for active QR code
-      if (!sellerUpiId && shouldPrintQr) {
+      // Query user_qr_codes table for active QR code (strictly extracts details from uploaded QR code)
+      if (shouldPrintQr) {
         try {
           const { data: qrRow } = await supabase
             .from('user_qr_codes')
-            .select('name, qr_image_url')
+            .select('*')
             .eq('user_id', sellerId)
             .eq('is_active', true)
             .order('created_at', { ascending: false })
             .limit(1)
             .maybeSingle();
 
-          if (qrRow?.name && qrRow.name.includes('@')) {
-            sellerUpiId = qrRow.name.trim();
+          if (qrRow) {
+            const qrDetails = await resolveUploadedQrDetails(qrRow);
+            if (qrDetails?.upiId) {
+              sellerUpiId = qrDetails.upiId;
+            }
+            if (qrDetails?.payeeName) {
+              qrPayeeName = qrDetails.payeeName;
+            }
           }
         } catch (_) {}
       }
@@ -1449,10 +1457,11 @@ export const printReceipt = async (orderDetails, options = {}) => {
 
     if (shouldPrintQr && total > 0) {
       const cleanUpi = sellerUpiId ? sellerUpiId.trim() : null;
+      const pnParam = qrPayeeName ? `&pn=${encodeURIComponent(qrPayeeName)}` : '';
       if (cleanUpi) {
-        dynamicQrText = `upi://pay?pa=${encodeURIComponent(cleanUpi)}&pn=${encodeURIComponent(resolvedSellerName)}&am=${total.toFixed(2)}&cu=INR&tn=Order%20${encodeURIComponent(orderNumber)}`;
-      } else {
-        dynamicQrText = `upi://pay?pn=${encodeURIComponent(resolvedSellerName)}&am=${total.toFixed(2)}&cu=INR&tn=Order%20${encodeURIComponent(orderNumber)}`;
+        dynamicQrText = `upi://pay?pa=${encodeURIComponent(cleanUpi)}${pnParam}&am=${total.toFixed(2)}&cu=INR&tn=Order%20${encodeURIComponent(orderNumber)}`;
+      } else if (qrPayeeName) {
+        dynamicQrText = `upi://pay?pn=${encodeURIComponent(qrPayeeName)}&am=${total.toFixed(2)}&cu=INR&tn=Order%20${encodeURIComponent(orderNumber)}`;
       }
 
       // 1. Vector SVG for 100% crisp mathematical rendering on thermal & system prints

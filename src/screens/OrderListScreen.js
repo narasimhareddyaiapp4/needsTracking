@@ -31,6 +31,7 @@ import {
   buildAndroidIntentUri,
   normalizeUpiId,
   isGenericQrName,
+  resolveUploadedQrDetails,
 } from '../services/qrScanService';
 
 const OrderListScreen = ({ navigation, route }) => {
@@ -71,7 +72,7 @@ const OrderListScreen = ({ navigation, route }) => {
       targetOrder.order_items?.[0]?.product_variant_combinations?.products?.user_id ||
       sellerId;
     let resolvedUpi = '';
-    let name = targetOrder.seller_name || sellerName || 'Store';
+    let qrPayeeName = '';
 
     if (targetOrder.seller_upi_id && !isGenericQrName(targetOrder.seller_upi_id)) {
       resolvedUpi = normalizeUpiId(targetOrder.seller_upi_id);
@@ -89,19 +90,20 @@ const OrderListScreen = ({ navigation, route }) => {
         if (prof?.upi_id && !isGenericQrName(prof.upi_id)) {
           resolvedUpi = normalizeUpiId(prof.upi_id);
         }
-        if (!name && prof?.full_name) {
-          name = prof.full_name;
-        }
       } catch (_) {}
     }
 
-    if (!resolvedUpi && targetSellerId) {
+    // Query user_qr_codes for seller (strictly extracts details from uploaded QR code)
+    if (targetSellerId) {
       try {
         const qrData = await getActiveQrCode(targetSellerId);
-        if (qrData?.name && !isGenericQrName(qrData.name)) {
-          const norm = normalizeUpiId(qrData.name);
-          if (norm && !isGenericQrName(norm)) {
-            resolvedUpi = norm;
+        if (qrData) {
+          const qrDetails = await resolveUploadedQrDetails(qrData);
+          if (qrDetails?.upiId) {
+            resolvedUpi = qrDetails.upiId;
+          }
+          if (qrDetails?.payeeName) {
+            qrPayeeName = qrDetails.payeeName;
           }
         }
       } catch (_) {}
@@ -111,7 +113,7 @@ const OrderListScreen = ({ navigation, route }) => {
 
     const uri = buildUpiPaymentUri({
       upiId: resolvedUpi || 'merchant@upi',
-      payeeName: name || 'Store',
+      payeeName: qrPayeeName || '',
       amount: targetTotal > 0 ? targetTotal : undefined,
       note: `Order ${orderNumber}`,
     });

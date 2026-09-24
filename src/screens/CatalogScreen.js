@@ -48,6 +48,7 @@ import StoreNavigationFooter from '../components/StoreNavigationFooter';
 import StoreQrModal from '../components/StoreQrModal';
 import SellerContactShareModal from '../components/SellerContactShareModal';
 import { batchFetchSellerContacts } from '../services/sellerContactService';
+import { getActiveEmployeeSession } from '../services/employeeService';
 
 const { width } = Dimensions.get('window');
 const SUBCAT_VIEW_MODE_KEY = '@catalog_subcat_view_mode';
@@ -130,6 +131,14 @@ const CatalogScreen = ({ navigation, route }) => {
       let isMounted = true;
       (async () => {
         if (!paramSellerId && !activeSellerId) {
+          try {
+            const emp = await getActiveEmployeeSession();
+            if (isMounted && emp?.seller_id) {
+              setActiveSellerId(emp.seller_id);
+              setActiveStoreName(emp.profiles?.full_name || null);
+              return;
+            }
+          } catch (_) {}
           try {
             const pref = await getPreferredStore();
             if (isMounted && pref?.sellerId) {
@@ -2486,6 +2495,7 @@ const CatalogScreen = ({ navigation, route }) => {
                     onPress={() => {
                       closeProductModal();
                       navigation.navigate('Cart', {
+                        ...(route?.params || {}),
                         sellerId: activeSellerId,
                         sellerName: activeStoreName,
                         customerId: paramCustomerId,
@@ -2529,7 +2539,10 @@ const CatalogScreen = ({ navigation, route }) => {
             )}
             <Button title="Checkout" onPress={() => {
               setIsCartModalVisible(false);
-              navigation.navigate('Checkout', { cart: user ? cart : { cart_items: guestCart } });
+              navigation.navigate('Checkout', {
+                ...(route?.params || {}),
+                cart: user ? cart : { cart_items: guestCart },
+              });
             }} />
           </View>
         </View>
@@ -2544,7 +2557,14 @@ const CatalogScreen = ({ navigation, route }) => {
           <View style={styles.viewCartContainer}>
             <TouchableOpacity
               style={styles.viewCartButton}
-              onPress={() => navigation.navigate('Cart', { sellerId: activeSellerId, sellerName: activeStoreName, customerId: paramCustomerId })}
+              onPress={() =>
+                navigation.navigate('Cart', {
+                  ...(route?.params || {}),
+                  sellerId: activeSellerId,
+                  sellerName: activeStoreName,
+                  customerId: paramCustomerId,
+                })
+              }
               activeOpacity={0.85}
             >
               <Text style={styles.viewCartText}>

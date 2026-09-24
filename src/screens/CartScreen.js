@@ -217,6 +217,7 @@ const CartScreen = ({ navigation, route }) => {
     }
     const resolvedSellerId = sellerId || cart?.cart_items?.[0]?.product_variant_combinations?.products?.user_id || null;
     navigation.navigate('Checkout', {
+      ...(route?.params || {}),
       cart: cart,
       customerId: customerIdToPass || customerId,
       sellerId: resolvedSellerId,

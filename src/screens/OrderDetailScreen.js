@@ -92,6 +92,8 @@ const OrderDetailScreen = ({ navigation, route }) => {
         }
       }
 
+      let qrPayeeName = '';
+
       // 3. Profiles
       if (!resolvedUpi && resolvedSellerId) {
         try {
@@ -103,33 +105,20 @@ const OrderDetailScreen = ({ navigation, route }) => {
           if (prof?.upi_id && !isGenericQrName(prof.upi_id)) {
             resolvedUpi = normalizeUpiId(prof.upi_id);
           }
-          if (!name && prof?.full_name) {
-            name = prof.full_name;
-          }
         } catch (_) {}
       }
 
-      // 4. user_qr_codes
+      // 4. Query user_qr_codes for seller (strictly extracts details from uploaded QR code)
       if (resolvedSellerId) {
         try {
           const qrData = await getActiveQrCode(resolvedSellerId);
           if (qrData) {
-            if (!resolvedUpi && qrData.name && !isGenericQrName(qrData.name)) {
-              const norm = normalizeUpiId(qrData.name);
-              if (norm && !isGenericQrName(norm)) {
-                resolvedUpi = norm;
-              }
+            const qrDetails = await resolveUploadedQrDetails(qrData);
+            if (qrDetails?.upiId) {
+              resolvedUpi = qrDetails.upiId;
             }
-            if (!resolvedUpi && (qrData.qr_image_url || qrData.qr_code_url)) {
-              try {
-                const decoded = await decodeQrFromImage(qrData.qr_image_url || qrData.qr_code_url);
-                if (decoded) {
-                  const parsed = parseUpiString(decoded);
-                  if (parsed?.upiId && !isGenericQrName(parsed.upiId)) {
-                    resolvedUpi = normalizeUpiId(parsed.upiId);
-                  }
-                }
-              } catch (_) {}
+            if (qrDetails?.payeeName) {
+              qrPayeeName = qrDetails.payeeName;
             }
           }
         } catch (_) {}
@@ -141,7 +130,7 @@ const OrderDetailScreen = ({ navigation, route }) => {
 
       const uri = buildUpiPaymentUri({
         upiId: resolvedUpi || 'merchant@upi',
-        payeeName: name || 'Store',
+        payeeName: qrPayeeName || '',
         amount: totalAmount > 0 ? totalAmount : undefined,
         note: `Order ${orderNumber}`,
       });

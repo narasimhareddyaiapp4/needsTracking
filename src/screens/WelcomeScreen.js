@@ -25,6 +25,7 @@ import { showAlert } from '../utils/alertUtils';
 import StoreNavigationFooter from '../components/StoreNavigationFooter';
 import FullScreenImageViewer from '../components/FullScreenImageViewer';
 import StoreQrModal from '../components/StoreQrModal';
+import WelcomeQrModal from '../components/WelcomeQrModal';
 import { getPreferredStore, setPreferredStore, clearPreferredStore } from '../services/localStorageService';
 
 const { width } = Dimensions.get('window');
@@ -90,6 +91,7 @@ export default function WelcomeScreen() {
 
   // Store QR Code Modal and Preferred Store state
   const [storeQrModalVisible, setStoreQrModalVisible] = useState(false);
+  const [welcomeQrModalVisible, setWelcomeQrModalVisible] = useState(false);
   const [qrModalSeller, setQrModalSeller] = useState(null);
   const [preferredStore, setPreferredStoreState] = useState(null);
 
@@ -580,8 +582,20 @@ export default function WelcomeScreen() {
       >
         {/* Upper Brand / Logo Section */}
         <View style={styles.brandContainer}>
-          <View style={styles.logoIconBox}>
-            <Icon name="map-marker" size={54} color="#007AFF" />
+          <View style={styles.brandTopRow}>
+            <View style={{ width: 68 }} />
+            <View style={styles.logoIconBox}>
+              <Icon name="map-marker" size={54} color="#007AFF" />
+            </View>
+            <TouchableOpacity
+              style={styles.headerQrBtn}
+              onPress={() => setWelcomeQrModalVisible(true)}
+              activeOpacity={0.8}
+              accessibilityLabel="Scan App QR Code"
+            >
+              <Icon name="qrcode" size={16} color="#007AFF" />
+              <Text style={styles.headerQrBtnText}>App QR</Text>
+            </TouchableOpacity>
           </View>
           <Text style={styles.appName}>Needs Tracker</Text>
           <Text style={styles.tagline}>
@@ -605,6 +619,29 @@ export default function WelcomeScreen() {
               <Text style={styles.mainButtonText}>Browse Sellers Map</Text>
             </View>
             <Icon name="chevron-right" size={14} color="#FFFFFF" />
+          </TouchableOpacity>
+
+          {/* App / Welcome Page QR Code Banner */}
+          <TouchableOpacity
+            style={styles.welcomeQrBanner}
+            activeOpacity={0.85}
+            onPress={() => setWelcomeQrModalVisible(true)}
+          >
+            <View style={styles.welcomeQrIconBox}>
+              <Icon name="qrcode" size={22} color="#007AFF" />
+            </View>
+            <View style={styles.welcomeQrInfo}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                <Text style={styles.welcomeQrTitle}>App QR Code • Scan to Open</Text>
+                <View style={styles.welcomeQrBadge}>
+                  <Text style={styles.welcomeQrBadgeText}>Instant</Text>
+                </View>
+              </View>
+              <Text style={styles.welcomeQrSubtitle}>
+                Scan with any phone camera to open or share this page
+              </Text>
+            </View>
+            <Icon name="chevron-right" size={14} color="#94A3B8" />
           </TouchableOpacity>
 
           {/* Active Store Lock Banner (when user scanned or selected an individual store) */}
@@ -973,6 +1010,12 @@ export default function WelcomeScreen() {
         onBrowseStore={handleBrowseStoreFromQr}
       />
 
+      {/* App / Welcome Page QR Code Modal */}
+      <WelcomeQrModal
+        visible={welcomeQrModalVisible}
+        onClose={() => setWelcomeQrModalVisible(false)}
+      />
+
       {/* Persistent Bottom Navigation Footer */}
       <StoreNavigationFooter
         activeTab="stores"
@@ -1010,6 +1053,35 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24,
     marginTop: Platform.OS === 'ios' ? 24 : 36,
   },
+  brandTopRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    width: '100%',
+    maxWidth: 340,
+    marginBottom: 16,
+  },
+  headerQrBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#FFFFFF',
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 20,
+    borderWidth: 1.5,
+    borderColor: '#BFDBFE',
+    shadowColor: '#007AFF',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  headerQrBtnText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#007AFF',
+  },
   logoIconBox: {
     width: 96,
     height: 96,
@@ -1022,7 +1094,6 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.15,
     shadowRadius: 16,
     elevation: 8,
-    marginBottom: 24,
   },
   appName: {
     fontSize: 28,
@@ -1063,7 +1134,60 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.2,
     shadowRadius: 12,
     elevation: 6,
-    marginBottom: 24,
+    marginBottom: 12,
+  },
+  welcomeQrBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderWidth: 1.5,
+    borderColor: '#E2E8F0',
+    marginBottom: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 6,
+    elevation: 2,
+    gap: 12,
+  },
+  welcomeQrIconBox: {
+    width: 44,
+    height: 44,
+    borderRadius: 12,
+    backgroundColor: '#EFF6FF',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#DBEAFE',
+  },
+  welcomeQrInfo: {
+    flex: 1,
+  },
+  welcomeQrTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#0F172A',
+  },
+  welcomeQrBadge: {
+    backgroundColor: '#ECFDF5',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#A7F3D0',
+  },
+  welcomeQrBadgeText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#059669',
+  },
+  welcomeQrSubtitle: {
+    fontSize: 12,
+    color: '#64748B',
+    marginTop: 2,
   },
   activeStoreBanner: {
     flexDirection: 'row',
