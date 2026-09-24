@@ -33,6 +33,8 @@ export const DEFAULT_PRINTER_CONFIG = {
   serviceCostRate: 0, // Service cost percentage e.g. 5%
   printTaxBreakdown: true, // Option to print CGST, SGST, Service Cost itemized rows on receipt
   printDynamicQr: true, // Option to print dynamic UPI QR code with exact order price on receipt
+  qrCodeSize: 'large', // 'normal' | 'large' | 'extra_large' (large view ensures 100% scan readability from mobile phones)
+  printOrderBarcode: true, // Option to print scannable Code-128 order barcode for phone/scanner tracking
 };
 
 // Global active Web Bluetooth BLE device/characteristic instance
@@ -61,6 +63,8 @@ export const getPrinterConfig = async () => {
         serviceCostRate: parsed.serviceCostRate !== undefined ? Number(parsed.serviceCostRate) : 0,
         printTaxBreakdown: parsed.printTaxBreakdown !== undefined ? Boolean(parsed.printTaxBreakdown) : true,
         printDynamicQr: parsed.printDynamicQr !== undefined ? Boolean(parsed.printDynamicQr) : true,
+        qrCodeSize: parsed.qrCodeSize || 'large',
+        printOrderBarcode: parsed.printOrderBarcode !== undefined ? Boolean(parsed.printOrderBarcode) : true,
       };
     }
   } catch (err) {
@@ -129,6 +133,78 @@ export const escapeHtml = (str) => {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#039;');
+};
+
+/**
+ * Standard Code 128 Patterns (Set B) for generating scannable 1D barcodes.
+ * 107 patterns each consisting of 6 bar/space widths (stop pattern has 7).
+ */
+const CODE128_PATTERNS = [
+  '212222', '222122', '222221', '121223', '121322', '131222', '122213', '122312', '132212', '221213',
+  '221312', '231212', '112232', '122132', '122231', '113222', '123122', '123221', '223211', '221132',
+  '221231', '213212', '223112', '312131', '311222', '321122', '321221', '312212', '322112', '322211',
+  '212123', '212321', '232121', '111323', '131123', '131321', '112313', '132113', '132311', '211313',
+  '231113', '231311', '112133', '112331', '132131', '113123', '113321', '133121', '313121', '211331',
+  '231131', '213113', '213311', '213131', '311123', '311321', '331121', '312113', '312311', '332111',
+  '314111', '221411', '431111', '111224', '111422', '121124', '121421', '141122', '141221', '112214',
+  '112412', '122114', '122411', '142112', '142211', '241211', '221114', '413111', '241112', '134111',
+  '111242', '121142', '121241', '114212', '124112', '124211', '411212', '421112', '421211', '212141',
+  '214121', '412121', '111143', '111341', '131141', '114113', '114311', '411113', '411311', '113141',
+  '114131', '311141', '411131', '211412', '211214', '211232', '2331112'
+];
+
+/**
+ * Generates a clean, standalone, high-contrast SVG 1D Code 128 barcode
+ * with quiet zones and human-readable text. Zero external dependencies.
+ */
+export const generateCode128Svg = (text, options = {}) => {
+  const str = String(text || '').trim();
+  if (!str) return '';
+
+  const height = options.height || 42;
+  const barWidth = options.barWidth || 1.35;
+  const quietZone = 10 * barWidth;
+
+  const START_B = 104;
+  const STOP = 106;
+  const codes = [START_B];
+  let checkSum = START_B;
+
+  for (let i = 0; i < str.length; i++) {
+    const code = str.charCodeAt(i) - 32;
+    if (code < 0 || code > 95) continue;
+    codes.push(code);
+    checkSum += code * (i + 1);
+  }
+  codes.push(checkSum % 103);
+  codes.push(STOP);
+
+  let fullPattern = '';
+  for (const c of codes) {
+    fullPattern += CODE128_PATTERNS[c] || '';
+  }
+
+  let totalModules = 0;
+  for (const digit of fullPattern) totalModules += parseInt(digit, 10);
+  const svgWidth = Math.ceil(totalModules * barWidth + quietZone * 2);
+
+  let x = quietZone;
+  let rects = '';
+  let isBar = true;
+  for (const digit of fullPattern) {
+    const w = parseInt(digit, 10) * barWidth;
+    if (isBar) {
+      rects += `<rect x="${x.toFixed(1)}" y="0" width="${w.toFixed(1)}" height="${height}" fill="#000"/>`;
+    }
+    x += w;
+    isBar = !isBar;
+  }
+
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${svgWidth} ${height + 13}" width="100%" style="max-width:${svgWidth}px;display:block;margin:0 auto;shape-rendering:crispEdges;">
+    <rect width="${svgWidth}" height="${height + 13}" fill="#fff"/>
+    ${rects}
+    <text x="${(svgWidth / 2).toFixed(1)}" y="${height + 10}" font-family="Courier, monospace" font-size="10" font-weight="bold" text-anchor="middle" fill="#000">${escapeHtml(str)}</text>
+  </svg>`;
 };
 
 /**
@@ -408,6 +484,25 @@ export const generateEscPosBytes = (data, config = DEFAULT_PRINTER_CONFIG) => {
     } else {
       addText(formatTwoColumns('Order No:', orderNoStr, width));
     }
+
+    // Optional 1D Code-128 Order Barcode for instant mobile camera / scanner tracking
+    if (config.printOrderBarcode !== false) {
+      const cleanBcCode = orderNoStr.replace(/[^A-Za-z0-9_-]/g, '').trim();
+      if (cleanBcCode.length > 0 && cleanBcCode.length <= 32) {
+        try {
+          addBytes(CMD_ALIGN_CENTER);
+          addBytes([GS, 0x68, 52]); // Barcode height (52 dots)
+          addBytes([GS, 0x77, is80mm ? 3 : 2]); // Module width (2 for 58mm, 3 for 80mm)
+          addBytes([GS, 0x48, 2]); // HRI chars below barcode
+          addBytes([GS, 0x66, 0]); // Font A
+          // ESC/POS Code 128 command: GS k 73 len data
+          const bcBytes = encoder.encode(cleanBcCode);
+          addBytes([GS, 0x6b, 73, bcBytes.length, ...bcBytes]);
+          addBytes([ESC, 0x64, 1]); // Small feed
+          addBytes(CMD_ALIGN_LEFT);
+        } catch (_) {}
+      }
+    }
   }
   if (config.printDayWiseNumber !== false && dayOrder) {
     addText(formatTwoColumns('Day Order No:', `#${String(dayOrder).replace(/^#/, '')}`, width));
@@ -557,11 +652,18 @@ export const generateEscPosBytes = (data, config = DEFAULT_PRINTER_CONFIG) => {
 
       // Model 2
       addBytes([GS, 0x28, 0x6b, 0x04, 0x00, 0x31, 0x41, 0x32, 0x00]);
-      // Module size (4 for 58mm, 6 for 80mm)
-      const qrSize = config.paperWidth === '80mm' ? 6 : 4;
+      // Module size (Configurable, default large for easy mobile camera focus)
+      let qrSize = config.paperWidth === '80mm' ? 8 : 6;
+      if (config.qrCodeSize === 'extra_large') {
+        qrSize = config.paperWidth === '80mm' ? 10 : 7;
+      } else if (config.qrCodeSize === 'normal') {
+        qrSize = config.paperWidth === '80mm' ? 7 : 5;
+      }
       addBytes([GS, 0x28, 0x6b, 0x03, 0x00, 0x31, 0x43, qrSize]);
-      // Error correction Level M
-      addBytes([GS, 0x28, 0x6b, 0x03, 0x00, 0x31, 0x45, 0x31]);
+      // Error correction Level L (0x30 = 7% error correction)
+      // Level L yields significantly fewer & larger modules than Level M (0x31),
+      // preventing thermal bleeding and allowing phones to scan effortlessly!
+      addBytes([GS, 0x28, 0x6b, 0x03, 0x00, 0x31, 0x45, 0x30]);
       // Store data
       const storeHeader = [GS, 0x28, 0x6b, pL, pH, 0x31, 0x50, 0x30];
       const qrBytes = encoder.encode(qrData);
@@ -576,7 +678,7 @@ export const generateEscPosBytes = (data, config = DEFAULT_PRINTER_CONFIG) => {
     if (data.sellerUpiId) {
       addText(`UPI: ${data.sellerUpiId}`);
     }
-    addText('Pay via GPay / PhonePe / Paytm');
+    addText('Pay via GPay / PhonePe / Paytm / Any UPI');
   }
 
   // 8. Footer
@@ -620,6 +722,14 @@ export const generateReceiptHtml = (data, config = DEFAULT_PRINTER_CONFIG) => {
   const widthMm = is80mm ? '72mm' : '48mm';
   const currencySymbol = config.currencySymbol || 'Rs.';
   const shouldPrintHeader = config.printHeader !== false;
+
+  // Calculate high-readability QR Code display dimensions for phone cameras
+  let qrPixelSize = is80mm ? 220 : 165;
+  if (config.qrCodeSize === 'extra_large') {
+    qrPixelSize = is80mm ? 250 : 185;
+  } else if (config.qrCodeSize === 'normal') {
+    qrPixelSize = is80mm ? 180 : 140;
+  }
 
   const rawTotal =
     data.total !== undefined && data.total !== null && String(data.total).trim() !== ''
@@ -749,6 +859,24 @@ export const generateReceiptHtml = (data, config = DEFAULT_PRINTER_CONFIG) => {
           table { width: 100%; border-collapse: collapse; margin: 4px 0; font-size: inherit; }
           th { border-bottom: 1px dashed #000; font-weight: bold; padding: 3px 0; font-size: inherit; }
           .total-row { font-size: ${is80mm ? '16px' : '14px'}; font-weight: bold; margin: 5px 0; display: flex; justify-content: space-between; }
+          .barcode-container { margin: 4px auto 6px auto; text-align: center; }
+          .qr-code-box {
+            display: inline-block;
+            background: #ffffff;
+            padding: 5px;
+            border: 1.5px solid #000;
+            border-radius: 4px;
+            margin: 0 auto;
+          }
+          .qr-code-box svg, .qr-code-box img {
+            width: ${qrPixelSize}px !important;
+            height: ${qrPixelSize}px !important;
+            display: block !important;
+            margin: 0 auto !important;
+            image-rendering: -webkit-optimize-contrast;
+            image-rendering: crisp-edges;
+            image-rendering: pixelated;
+          }
           .footer { margin-top: 6px; margin-bottom: 0; padding-bottom: 0; font-size: ${is80mm ? '11px' : '10px'}; }
         </style>
       </head>
@@ -776,6 +904,11 @@ export const generateReceiptHtml = (data, config = DEFAULT_PRINTER_CONFIG) => {
           ` : ''}
 
           <div class="meta-row"><span>Order No:</span><span class="bold">${data.orderId || data.rawOrderId || 'N/A'}</span></div>
+          ${config.printOrderBarcode !== false && (data.orderId || data.rawOrderId) ? `
+          <div class="barcode-container">
+            ${generateCode128Svg(String(data.orderId || data.rawOrderId), { height: is80mm ? 44 : 36, barWidth: is80mm ? 1.5 : 1.25 })}
+          </div>
+          ` : ''}
           ${shouldPrintDayWise ? `<div class="meta-row"><span>Day Order No:</span><span class="bold">#${String(dayOrder).replace(/^#/,'')}</span></div>` : ''}
           <div class="meta-row"><span>Date:</span><span>${data.date || new Date().toLocaleString()}</span></div>
           ${data.customerName ? `<div class="meta-row"><span>Customer:</span><span class="bold">${data.customerName}</span></div>` : ''}
@@ -818,15 +951,19 @@ export const generateReceiptHtml = (data, config = DEFAULT_PRINTER_CONFIG) => {
           ${data.paymentReference ? `<div class="meta-row"><span>UPI/Pay Ref:</span><span class="bold">${escapeHtml(data.paymentReference)}</span></div>` : ''}
           ${data.paymentStatus ? `<div class="meta-row"><span>Status:</span><span class="bold">${String(data.paymentStatus).toUpperCase()}</span></div>` : ''}
 
-          ${(data.shouldPrintQr !== false && config.printDynamicQr !== false && (data.dynamicQrUrl || data.dynamicQrText)) ? `
+          ${(data.shouldPrintQr !== false && config.printDynamicQr !== false && (data.dynamicQrSvg || data.dynamicQrUrl || data.dynamicQrText)) ? `
           <div class="divider"></div>
-          <div class="center qr-receipt-section" style="margin: 6px 0; text-align: center;">
-            <div style="font-weight: 800; font-size: ${is80mm ? '12px' : '10.5px'}; margin-bottom: 4px; letter-spacing: 0.5px;">
+          <div class="center qr-receipt-section" style="margin: 8px 0; text-align: center;">
+            <div style="font-weight: 800; font-size: ${is80mm ? '13px' : '11px'}; margin-bottom: 5px; letter-spacing: 0.5px;">
               ⚡ SCAN &amp; PAY: ${currencySymbol}${safeFormatNumber(computedTotal)}
             </div>
-            <img src="${data.dynamicQrUrl || `https://api.qrserver.com/v1/create-qr-code/?size=250x250&margin=4&data=${encodeURIComponent(data.dynamicQrText)}`}" alt="Payment QR" style="width: ${is80mm ? '140px' : '110px'}; height: ${is80mm ? '140px' : '110px'}; margin: 0 auto; display: block;" />
-            ${data.sellerUpiId ? `<div style="font-size: ${is80mm ? '10px' : '8.5px'}; font-weight: bold; margin-top: 3px; color: #111;">UPI: ${escapeHtml(data.sellerUpiId)}</div>` : ''}
-            <div style="font-size: ${is80mm ? '9px' : '7.5px'}; color: #555; margin-top: 1px;">Google Pay • PhonePe • Paytm • Any UPI App</div>
+            <div class="qr-code-box">
+              ${data.dynamicQrSvg ? data.dynamicQrSvg : `
+                <img src="${data.dynamicQrUrl || `https://api.qrserver.com/v1/create-qr-code/?size=600x600&margin=4&ecc=L&data=${encodeURIComponent(data.dynamicQrText)}`}" alt="Payment QR" />
+              `}
+            </div>
+            ${data.sellerUpiId ? `<div style="font-size: ${is80mm ? '11px' : '9.5px'}; font-weight: bold; margin-top: 4px; color: #000;">UPI: ${escapeHtml(data.sellerUpiId)}</div>` : ''}
+            <div style="font-size: ${is80mm ? '9.5px' : '8px'}; color: #333; margin-top: 2px; font-weight: 600;">Google Pay • PhonePe • Paytm • Any UPI App</div>
           </div>
           ` : ''}
 
@@ -1308,6 +1445,7 @@ export const printReceipt = async (orderDetails, options = {}) => {
 
     let dynamicQrText = null;
     let dynamicQrUrl = null;
+    let dynamicQrSvg = null;
 
     if (shouldPrintQr && total > 0) {
       const cleanUpi = sellerUpiId ? sellerUpiId.trim() : null;
@@ -1317,10 +1455,30 @@ export const printReceipt = async (orderDetails, options = {}) => {
         dynamicQrText = `upi://pay?pn=${encodeURIComponent(resolvedSellerName)}&am=${total.toFixed(2)}&cu=INR&tn=Order%20${encodeURIComponent(orderNumber)}`;
       }
 
+      // 1. Vector SVG for 100% crisp mathematical rendering on thermal & system prints
       try {
-        dynamicQrUrl = await QRCode.toDataURL(dynamicQrText, { width: 250, margin: 2 });
+        dynamicQrSvg = await QRCode.toString(dynamicQrText, {
+          type: 'svg',
+          errorCorrectionLevel: 'L',
+          margin: 4,
+        });
+      } catch (svgErr) {
+        console.warn('[PrinterService] QR SVG generation fallback:', svgErr);
+      }
+
+      // 2. High-res DataURL PNG fallback (Level L = fewer/larger modules, margin 4 = ISO quiet zone)
+      try {
+        dynamicQrUrl = await QRCode.toDataURL(dynamicQrText, {
+          errorCorrectionLevel: 'L',
+          margin: 4,
+          width: 600,
+          color: {
+            dark: '#000000',
+            light: '#ffffff',
+          },
+        });
       } catch (qrErr) {
-        dynamicQrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=250x250&margin=4&data=${encodeURIComponent(dynamicQrText)}`;
+        dynamicQrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=600x600&margin=4&ecc=L&data=${encodeURIComponent(dynamicQrText)}`;
       }
     }
 
@@ -1356,6 +1514,7 @@ export const printReceipt = async (orderDetails, options = {}) => {
       storeName: options.storeName || resolvedSellerName || undefined,
       dynamicQrText,
       dynamicQrUrl,
+      dynamicQrSvg,
       sellerUpiId,
       shouldPrintQr,
       printDynamicQr: shouldPrintQr,
@@ -1462,26 +1621,52 @@ export const printPreBill = async (cart) => {
  */
 export const printTestReceipt = async () => {
   const config = await getPrinterConfig();
+  const testUpiText = 'upi://pay?pa=teststore@upi&pn=Test%20Store&am=50.00&cu=INR&tn=Test%20Slip';
+  let dynamicQrSvg = null;
+  let dynamicQrUrl = null;
+
+  try {
+    dynamicQrSvg = await QRCode.toString(testUpiText, {
+      type: 'svg',
+      errorCorrectionLevel: 'L',
+      margin: 4,
+    });
+    dynamicQrUrl = await QRCode.toDataURL(testUpiText, {
+      errorCorrectionLevel: 'L',
+      margin: 4,
+      width: 600,
+      color: {
+        dark: '#000000',
+        light: '#ffffff',
+      },
+    });
+  } catch (_) {}
+
   const payload = {
     title: '=== PRINTER TEST SLIP ===',
-    orderId: '20260829-0001',
+    orderId: 'TEST-2026-0001',
     dayOrderNo: '0001',
     dailyOrderNumber: '0001',
     dayWiseOrderNo: '0001',
     date: new Date().toLocaleString(),
     items: [
       { name: '58mm/80mm Alignment Test', quantity: 1, price: 10.0 },
-      { name: 'Thermal ESC/POS Check', quantity: 2, price: 20.0 },
+      { name: 'Barcode & QR Scanner Check', quantity: 2, price: 20.0 },
     ],
     subtotal: 50.0,
     total: 50.0,
     paymentMethod: 'TEST OK',
     paymentStatus: 'VERIFIED',
+    dynamicQrText: testUpiText,
+    dynamicQrSvg,
+    dynamicQrUrl,
+    sellerUpiId: 'teststore@upi',
+    shouldPrintQr: config.printDynamicQr !== false,
   };
 
   try {
     const result = await printDataPayload(payload);
-    Alert.alert('Test Print Sent', `Test slip successfully sent to ${config.printerName || 'Printer'}.`);
+    Alert.alert('Test Print Sent', `Test slip successfully sent to ${config.printerName || 'Printer'}. Test scanning the Barcode & QR code with your phone camera!`);
     return result;
   } catch (err) {
     Alert.alert('Test Print Error', err.message || 'Failed to print test slip.');

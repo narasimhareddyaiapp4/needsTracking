@@ -32,6 +32,7 @@ import {
   isGenericQrName,
   decodeQrFromImage,
   parseUpiString,
+  resolveUploadedQrDetails,
 } from '../services/qrScanService';
 
 const OrderDetailScreen = ({ navigation, route }) => {

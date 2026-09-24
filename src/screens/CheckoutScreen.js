@@ -34,7 +34,9 @@ import { getGuestCart, clearGuestCart, getPreferredStore, saveGuestOrderId } fro
 import { schedulePushNotification } from '../services/notificationService';
 import { showAlert } from '../utils/alertUtils';
 import { downloadQrCodeImage } from '../utils/qrDownloadUtils';
-import { getPrinterConfig } from '../services/printerService';
+import { getPrinterConfig, printReceipt, extractOrderNumbers, announceOrderPrint } from '../services/printerService';
+import { getActiveEmployeeSession, resolveEmployeeSession } from '../services/employeeService';
+import { useCart } from '../context/CartContext';
 import StoreNavigationFooter from '../components/StoreNavigationFooter';
 import FullScreenImageViewer from '../components/FullScreenImageViewer';
 import {
@@ -47,11 +49,27 @@ import {
   parseUpiString,
   normalizeUpiId,
   isGenericQrName,
+  resolveUploadedQrDetails,
 } from '../services/qrScanService';
 
 const CheckoutScreen = ({ navigation, route }) => {
   const { cart: initialCart, customerId } = route?.params || {};
   const [cart, setCart] = useState(initialCart || null);
+  const cartContext = useCart ? useCart() : null;
+  const contextSetCart = cartContext?.setCart;
+
+  // Seller / Employee Fast POS Counter Billing States
+  const [activeEmployee, setActiveEmployee] = useState(null);
+  const [showPosConfirmModal, setShowPosConfirmModal] = useState(false);
+  const [posPaymentMethod, setPosPaymentMethod] = useState('cash'); // 'cash' | 'upi'
+  const [posPrintReceipt, setPosPrintReceipt] = useState(false);
+  const [isProcessingPos, setIsProcessingPos] = useState(false);
+  const [posCustomerName, setPosCustomerName] = useState('');
+  const [posCustomerMobile, setPosCustomerMobile] = useState('');
+  const [posTableNo, setPosTableNo] = useState('Main counter');
+  const [showPosSuccessModal, setShowPosSuccessModal] = useState(false);
+  const [posSuccessData, setPosSuccessData] = useState(null);
+  const [successCountdown, setSuccessCountdown] = useState(3);
 
   useEffect(() => {
     if (route?.params?.cart) {
@@ -106,6 +124,7 @@ const CheckoutScreen = ({ navigation, route }) => {
   const [sellerQr, setSellerQr] = useState(null);
   const [sellerProfile, setSellerProfile] = useState(null);
   const [sellerUpiId, setSellerUpiId] = useState('');
+  const [sellerQrPayeeName, setSellerQrPayeeName] = useState('');
   const [sellerRawUpiText, setSellerRawUpiText] = useState('');
   const [loadingSellerQr, setLoadingSellerQr] = useState(false);
   // 6-digit unique payment transaction reference (strictly digits, easy to identify in UPI statements)
@@ -224,6 +243,19 @@ const CheckoutScreen = ({ navigation, route }) => {
           }
         }
 
+        // Check active employee / cashier session
+        try {
+          let emp = await getActiveEmployeeSession();
+          if (!emp && user) {
+            emp = await resolveEmployeeSession(user);
+          }
+          if (emp) {
+            setActiveEmployee(emp);
+          }
+        } catch (empErr) {
+          console.warn('Notice checking employee session in checkout:', empErr);
+        }
+
         const userCart = await getCart(user.id);
         if (userCart && userCart.cart_items && userCart.cart_items.length > 0) {
           setCart(userCart);
@@ -240,6 +272,37 @@ const CheckoutScreen = ({ navigation, route }) => {
       console.warn('Error in refreshCartAndUser:', err);
     }
   }, [initialCart]);
+
+  // Sync active employee details from route parameters if passed
+  useEffect(() => {
+    if (route?.params?.employeeId || route?.params?.employeeName) {
+      setActiveEmployee((prev) => ({
+        ...(prev || {}),
+        id: route.params.employeeId || prev?.id,
+        name: route.params.employeeName || prev?.name,
+        seller_id: route.params.sellerId || prev?.seller_id,
+        designation: route.params.employeeDesignation || prev?.designation,
+      }));
+    }
+  }, [route?.params]);
+
+  const isEmployee = Boolean(
+    activeEmployee ||
+    route?.params?.isEmployee ||
+    route?.params?.role === 'seller_employee' ||
+    profile?.role === 'seller_employee' ||
+    currentUser?.user_metadata?.role === 'seller_employee'
+  );
+
+  const isSeller = Boolean(
+    !isEmployee && (
+      profile?.role === 'seller' ||
+      currentUser?.user_metadata?.role === 'seller' ||
+      route?.params?.role === 'seller'
+    )
+  );
+
+  const isSellerOrEmployee = isSeller || isEmployee;
 
   useEffect(() => {
     refreshCartAndUser();
@@ -344,6 +407,9 @@ const CheckoutScreen = ({ navigation, route }) => {
       if (!targetSellerId && profile?.role === 'seller' && currentUser?.id) {
         targetSellerId = currentUser.id;
       }
+      if (!targetSellerId && activeEmployee?.seller_id) {
+        targetSellerId = activeEmployee.seller_id;
+      }
 
       let configuredUpiId = '';
       let configuredQr = null;
@@ -382,41 +448,26 @@ const CheckoutScreen = ({ navigation, route }) => {
           }
         }
 
-        // 2. Active QR code record from 'user_qr_codes'
+        // 2. Active QR code record from 'user_qr_codes' (Primary authority for payment details)
         const qrData = await getActiveQrCode(targetSellerId);
         if (qrData) {
           configuredQr = qrData;
           setSellerQr(qrData);
-          if (!configuredUpiId && qrData.name && !isGenericQrName(qrData.name)) {
-            const normQr = normalizeUpiId(qrData.name);
-            if (normQr && !isGenericQrName(normQr)) {
-              configuredUpiId = normQr;
-            }
-          }
-        }
 
-        // 3. Scan QR image if UPI ID is not yet resolved
-        const profileQrUrl = configuredQr?.qr_image_url || configuredQr?.qr_code_url;
-        if (!configuredUpiId && profileQrUrl) {
           try {
             setIsScanningProfileQr(true);
-            const scan = await decodeQrFromImage(profileQrUrl);
-            if (scan?.success) {
-              if (scan.rawText) {
-                setSellerRawUpiText(scan.rawText);
-              }
-              if (scan.upiId) {
-                const scannedUpi = normalizeUpiId(scan.upiId);
-                if (scannedUpi && !isGenericQrName(scannedUpi)) {
-                  configuredUpiId = scannedUpi;
-                }
-              }
-              if (scan.payeeName && !profData?.full_name) {
-                setSellerProfile((prev) => ({ ...(prev || {}), full_name: scan.payeeName }));
-              }
+            const qrDetails = await resolveUploadedQrDetails(qrData);
+            if (qrDetails?.upiId) {
+              configuredUpiId = qrDetails.upiId;
             }
-          } catch (scanErr) {
-            console.warn('Notice scanning profile QR in checkout:', scanErr);
+            if (qrDetails?.payeeName) {
+              setSellerQrPayeeName(qrDetails.payeeName);
+            }
+            if (qrDetails?.rawText) {
+              setSellerRawUpiText(qrDetails.rawText);
+            }
+          } catch (qrErr) {
+            console.warn('Notice resolving uploaded QR details in checkout:', qrErr);
           } finally {
             setIsScanningProfileQr(false);
           }
@@ -462,12 +513,18 @@ const CheckoutScreen = ({ navigation, route }) => {
         if (qrData) {
           configuredQr = qrData;
           setSellerQr(qrData);
-          if (!configuredUpiId && qrData.name && !isGenericQrName(qrData.name)) {
-            const normQr = normalizeUpiId(qrData.name);
-            if (normQr && !isGenericQrName(normQr)) {
-              configuredUpiId = normQr;
+          try {
+            const qrDetails = await resolveUploadedQrDetails(qrData);
+            if (qrDetails?.upiId) {
+              configuredUpiId = qrDetails.upiId;
             }
-          }
+            if (qrDetails?.payeeName) {
+              setSellerQrPayeeName(qrDetails.payeeName);
+            }
+            if (qrDetails?.rawText) {
+              setSellerRawUpiText(qrDetails.rawText);
+            }
+          } catch (_) {}
         }
       }
 
@@ -498,7 +555,7 @@ const CheckoutScreen = ({ navigation, route }) => {
     } finally {
       setLoadingSellerQr(false);
     }
-  }, [cart, customerId, profile, currentUser]);
+  }, [cart, customerId, profile, currentUser, activeEmployee]);
 
   useEffect(() => {
     fetchSellerUpiInfo();
@@ -519,14 +576,18 @@ const CheckoutScreen = ({ navigation, route }) => {
     (sellerQr && (sellerQr.qr_image_url || sellerQr.qr_code_url || sellerQr.name))
   );
 
-  const payeeName =
+  // Store / Shop display name for UI labels (strictly for checkout display, e.g. "Pay to Store: ABC")
+  const storeDisplayName =
     route?.params?.sellerName ||
     sellerProfile?.store_name ||
     sellerProfile?.full_name ||
     sellerProfile?.name ||
     profile?.store_name ||
     profile?.full_name ||
-    '';
+    'Store';
+
+  // For dynamic bill QR loading, strictly use payee name from uploaded QR code details ONLY (never profile name)
+  const dynamicPayeeName = sellerQrPayeeName || '';
 
   // Alphanumeric with spaces only - strictly NO '#' character so UPI apps (GPay, PhonePe, Paytm) never fail
   const cleanCartRef = (cart?.id || '').toString().replace(/[^a-zA-Z0-9]/g, '').slice(-4).toUpperCase();
@@ -538,7 +599,7 @@ const CheckoutScreen = ({ navigation, route }) => {
   const dynamicUpiUri = activeUpiId
     ? buildUpiPaymentUri({
         upiId: activeUpiId,
-        payeeName,
+        payeeName: dynamicPayeeName,
         amount: totalAmount,
         note: orderNote,
         rawText: sellerRawUpiText,
@@ -550,7 +611,7 @@ const CheckoutScreen = ({ navigation, route }) => {
   const staticUpiUri = activeUpiId
     ? buildUpiPaymentUri({
         upiId: activeUpiId,
-        payeeName,
+        payeeName: dynamicPayeeName,
         rawText: sellerRawUpiText,
       })
     : '';
@@ -582,13 +643,13 @@ const CheckoutScreen = ({ navigation, route }) => {
   const upiAppList = useMemo(() => {
     return buildUpiAppLinks({
       upiId: activeUpiId || sellerUpiId,
-      payeeName,
+      payeeName: dynamicPayeeName,
       amount: totalAmount,
       note: orderNote,
       rawText: sellerRawUpiText,
       tr: uniquePaymentCode,
     });
-  }, [activeUpiId, sellerUpiId, payeeName, totalAmount, orderNote, sellerRawUpiText, uniquePaymentCode]);
+  }, [activeUpiId, sellerUpiId, dynamicPayeeName, totalAmount, orderNote, sellerRawUpiText, uniquePaymentCode]);
 
   const getAppWebHref = (app) => {
     if (!app || Platform.OS !== 'web' || typeof navigator === 'undefined') return undefined;
@@ -757,7 +818,7 @@ const CheckoutScreen = ({ navigation, route }) => {
     const launchResult = await openUpiAppIntent({
       appId,
       upiId: resolvedUpi,
-      payeeName,
+      payeeName: dynamicPayeeName,
       amount: totalAmount,
       note: orderNote,
       rawText: sellerRawUpiText,
@@ -1467,6 +1528,10 @@ const CheckoutScreen = ({ navigation, route }) => {
       }
       // Also clear local guest cart
       await clearGuestCart();
+      setCart({ cart_items: [] });
+      if (contextSetCart) {
+        contextSetCart({ cart_items: [] });
+      }
 
       setLoading(false);
 
@@ -1504,10 +1569,329 @@ const CheckoutScreen = ({ navigation, route }) => {
     route?.params?.sellerId ||
     cartItems?.[0]?.product_variant_combinations?.products?.user_id ||
     cartItems?.[0]?.product_variant_combinations?.products?.customer_id ||
+    activeEmployee?.seller_id ||
+    (isSeller ? (profile?.id || currentUser?.id) : null) ||
     sellerProfile?.id ||
     null;
   const resolvedSellerName = route?.params?.sellerName || sellerProfile?.full_name || null;
   const resolvedCustomerId = customerId || currentUser?.id || null;
+
+  // Prompt before completing Fast POS Order (Cash or UPI)
+  const promptFastOrderConfirmation = (method) => {
+    setPosPaymentMethod(method);
+    setPosCustomerName(name || '');
+    setPosCustomerMobile(mobile || '');
+    setPosTableNo(tableNo || 'Main counter');
+    setPosPrintReceipt(false);
+    setShowPosConfirmModal(true);
+  };
+
+  // Fast Navigation back to Catalog / POS Billing for next customer
+  const navigateToCatalog = (orderInfo) => {
+    setShowPosSuccessModal(false);
+    setPosSuccessData(null);
+    const catalogParams = {
+      sellerId: resolvedSellerId,
+      sellerName: resolvedSellerName,
+      customerId: resolvedCustomerId,
+      lastCompletedOrderId: orderInfo?.id,
+      freshSale: Date.now(),
+    };
+
+    const state = navigation.getState ? navigation.getState() : null;
+    const routeNames = state?.routeNames || [];
+    if (routeNames.includes('Catalog')) {
+      navigation.navigate('Catalog', catalogParams);
+    } else {
+      try {
+        navigation.navigate('CatalogTab', {
+          screen: 'Catalog',
+          params: catalogParams,
+        });
+      } catch (_) {
+        try {
+          navigation.navigate('Catalog', catalogParams);
+        } catch (__) {
+          navigation.goBack();
+        }
+      }
+    }
+  };
+
+  // Auto-redirect timer for Fast POS Success (3s countdown)
+  useEffect(() => {
+    let timer = null;
+    let countdownInterval = null;
+    if (showPosSuccessModal && posSuccessData) {
+      setSuccessCountdown(3);
+      countdownInterval = setInterval(() => {
+        setSuccessCountdown((prev) => (prev > 1 ? prev - 1 : 1));
+      }, 1000);
+
+      timer = setTimeout(() => {
+        navigateToCatalog(posSuccessData?.order);
+      }, 3000);
+    }
+    return () => {
+      if (timer) clearTimeout(timer);
+      if (countdownInterval) clearInterval(countdownInterval);
+    };
+  }, [showPosSuccessModal, posSuccessData]);
+
+  // Fast POS Counter Billing Order Placement (Paid by Cash / Paid by UPI)
+  const handleFastPosOrder = async (method, options = {}) => {
+    const isCash = method === 'cash';
+    const chosenMethod = isCash ? 'cod' : 'upi';
+    const chosenStatus = 'completed';
+    const chosenPayStatus = 'paid';
+    const printOnFinish = Boolean(options.printReceipt);
+    const customerDisplayName = (options.customerName || name || '').trim() || 'Counter Customer';
+    const customerMobile = (options.customerMobile || mobile || '').trim().replace(/[\s\-()]/g, '');
+    const activeTable = options.tableNo || tableNo || 'Main counter';
+
+    if (cartItems.length === 0) {
+      showAlert('Empty Cart', 'Cart has no items to bill.');
+      return;
+    }
+
+    if (!isCash && !isUpiConfigured) {
+      showAlert(
+        'UPI Not Configured',
+        'Store UPI details are not configured. Please collect payment in Cash.'
+      );
+      return;
+    }
+
+    setIsProcessingPos(true);
+    setLoading(true);
+
+    try {
+      const { data: { user } = {} } = await supabase.auth.getUser();
+      const orderUserId = user?.id || null;
+
+      // Group cart items by seller
+      const itemsBySeller = {};
+      for (const item of cartItems) {
+        const prod = item.product_variant_combinations?.products;
+        const sellerId = prod?.user_id || prod?.customer_id || 'store';
+        if (!itemsBySeller[sellerId]) {
+          itemsBySeller[sellerId] = {
+            sellerId: sellerId === 'store' ? null : sellerId,
+            items: [],
+            subtotal: 0,
+          };
+        }
+        const itemPrice = Number(item.product_variant_combinations?.price || 0);
+        const itemQty = Number(item.quantity || 1);
+        itemsBySeller[sellerId].items.push(item);
+        itemsBySeller[sellerId].subtotal += itemPrice * itemQty;
+      }
+
+      const sellerKeys = Object.keys(itemsBySeller);
+      const createdOrders = [];
+
+      for (const sellerKey of sellerKeys) {
+        const sellerGroup = itemsBySeller[sellerKey];
+        const rawSellerId = sellerGroup.sellerId && sellerGroup.sellerId !== 'store'
+          ? sellerGroup.sellerId
+          : (resolvedSellerId || (profile?.role === 'seller' ? profile?.id : null));
+
+        const isValidUUID = (val) =>
+          typeof val === 'string' &&
+          /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val.trim());
+        const targetSellerId = isValidUUID(rawSellerId) ? rawSellerId.trim() : null;
+
+        const groupSubtotal = sellerGroup.subtotal;
+        const groupCgst = isTaxEnabled && groupSubtotal > 0 ? Math.round(groupSubtotal * (cgstRate / 100) * 100) / 100 : 0;
+        const groupSgst = isTaxEnabled && groupSubtotal > 0 ? Math.round(groupSubtotal * (sgstRate / 100) * 100) / 100 : 0;
+        const groupService = isServiceCostEnabled && groupSubtotal > 0 && serviceCostRate > 0 ? Math.round(groupSubtotal * (serviceCostRate / 100) * 100) / 100 : 0;
+        const groupTotal = groupSubtotal + groupCgst + groupSgst + groupService;
+
+        const billingBreakdown = {
+          subtotal: groupSubtotal,
+          cgst_amount: groupCgst,
+          sgst_amount: groupSgst,
+          service_cost: groupService,
+          cgst_rate: cgstRate,
+          sgst_rate: sgstRate,
+          service_cost_rate: serviceCostRate,
+          total: groupTotal,
+        };
+
+        const cashierTitle = isEmployee
+          ? `${activeEmployee?.name || 'Staff'} (${activeEmployee?.designation || 'Cashier'})`
+          : (profile?.full_name || 'Store Owner');
+
+        const shippingWithBilling = {
+          type: 'Dine-in',
+          table_no: activeTable,
+          name: customerDisplayName,
+          mobile: customerMobile || (profile?.mobile || ''),
+          address: `POS Counter Bill (${activeTable})`,
+          city: city || profile?.city || '',
+          postalCode: postalCode || profile?.zip_code || '',
+          billing: billingBreakdown,
+          payment_reference: uniquePaymentCode,
+          payment_note: orderNote,
+          payment_status: 'paid',
+          cashier_name: cashierTitle,
+          cashier_id: activeEmployee?.id || null,
+        };
+
+        const orderPayload = {
+          user_id: orderUserId,
+          seller_id: targetSellerId,
+          shipping_address: shippingWithBilling,
+          total_amount: groupTotal,
+          subtotal: groupSubtotal,
+          cgst_amount: groupCgst,
+          sgst_amount: groupSgst,
+          service_cost: groupService,
+          cgst_rate: cgstRate,
+          sgst_rate: sgstRate,
+          service_cost_rate: serviceCostRate,
+          status: chosenStatus,
+          payment_method: chosenMethod,
+          payment_reference: uniquePaymentCode,
+          payment_status: chosenPayStatus,
+          order_type: 'shop-order',
+          table_no: activeTable,
+        };
+
+        let order = null;
+        let orderError = null;
+
+        // Direct table insert
+        let res = await supabase
+          .from('orders')
+          .insert(orderPayload)
+          .select()
+          .single();
+        order = res.data;
+        orderError = res.error;
+
+        if (orderError && (orderError.code === 'PGRST204' || (orderError.message && orderError.message.includes('column')))) {
+          console.warn('Retrying POS sub-order creation without extra columns:', orderError.message);
+          const fallbackPayload = {
+            user_id: orderUserId,
+            seller_id: targetSellerId,
+            shipping_address: shippingWithBilling,
+            total_amount: groupTotal,
+            status: chosenStatus,
+            payment_method: chosenMethod,
+            payment_reference: uniquePaymentCode,
+            order_type: 'shop-order',
+            table_no: activeTable,
+          };
+          if (orderError.message && orderError.message.includes('payment_reference')) {
+            delete fallbackPayload.payment_reference;
+          }
+          let retry = await supabase.from('orders').insert(fallbackPayload).select().single();
+          if (retry.error && (retry.error.code === 'PGRST204' || (retry.error.message && retry.error.message.includes('seller_id')))) {
+            delete fallbackPayload.seller_id;
+            retry = await supabase.from('orders').insert(fallbackPayload).select().single();
+          }
+          if (retry.error && (retry.error.code === 'PGRST204' || (retry.error.message && (retry.error.message.includes('payment_reference') || retry.error.message.includes('column'))))) {
+            delete fallbackPayload.payment_reference;
+            retry = await supabase.from('orders').insert(fallbackPayload).select().single();
+          }
+          order = retry.data;
+          orderError = retry.error;
+        }
+
+        if (orderError) {
+          console.error('Error creating POS sub-order:', orderError.message);
+          throw orderError;
+        }
+
+        const orderItemsPayload = sellerGroup.items.map((item) => ({
+          order_id: order.id,
+          product_variant_combination_id: item.product_variant_combinations.id,
+          quantity: item.quantity,
+          price: item.product_variant_combinations.price,
+        }));
+
+        const { error: orderItemsError } = await supabase
+          .from('order_items')
+          .insert(orderItemsPayload);
+
+        if (orderItemsError) {
+          console.error('Error creating POS order items:', orderItemsError.message);
+          throw orderItemsError;
+        }
+
+        if (order) {
+          order.billing = billingBreakdown;
+          order.subtotal = groupSubtotal;
+          order.cgst_amount = groupCgst;
+          order.sgst_amount = groupSgst;
+          order.service_cost = groupService;
+          order.cgst_rate = cgstRate;
+          order.sgst_rate = sgstRate;
+          order.service_cost_rate = serviceCostRate;
+          order.order_items = sellerGroup.items;
+          order.payment_status = 'paid';
+          order.status = 'completed';
+        }
+
+        createdOrders.push(order);
+        if (!orderUserId && order?.id) {
+          saveGuestOrderId(order.id);
+        }
+      }
+
+      // Clear the user's cart in database if cart.id is present
+      if (cart?.id) {
+        await supabase.from('cart_items').delete().eq('cart_id', cart.id);
+      }
+      await clearGuestCart();
+      setCart({ cart_items: [] });
+      if (contextSetCart) {
+        contextSetCart({ cart_items: [] });
+      }
+
+      // Reset payment code for next transaction
+      setUniquePaymentCode(Math.floor(100000 + Math.random() * 900000).toString());
+
+      const firstOrder = createdOrders[0];
+
+      // Auto-print receipt if requested
+      if (printOnFinish && firstOrder) {
+        try {
+          await printReceipt(firstOrder, {
+            storeName: resolvedSellerName || profile?.store_name || profile?.full_name,
+          });
+        } catch (printErr) {
+          console.warn('POS receipt print error:', printErr);
+        }
+      }
+
+      // Voice announcement if enabled
+      if (firstOrder) {
+        try {
+          announceOrderPrint(firstOrder);
+        } catch (_) {}
+      }
+
+      setShowPosConfirmModal(false);
+      setIsProcessingPos(false);
+      setLoading(false);
+
+      // Open Fast Success Modal with Next Customer countdown / 1-tap reload of Catalog!
+      setPosSuccessData({
+        order: firstOrder,
+        orderCount: createdOrders.length,
+        method: isCash ? 'Cash' : 'UPI',
+        amount: totalAmount,
+      });
+      setShowPosSuccessModal(true);
+
+    } catch (err) {
+      setIsProcessingPos(false);
+      setLoading(false);
+      showAlert('Billing Error', err.message || 'Failed to complete fast bill. Please try again.');
+    }
+  };
 
   const openQrImageViewer = () => {
     const list = [];
@@ -1702,6 +2086,158 @@ const CheckoutScreen = ({ navigation, route }) => {
           )}
           <Text style={styles.summaryTotal}>Total: ₹{totalAmount.toFixed(2)}</Text>
         </View>
+
+        {/* ============================================================ */}
+        {/* FAST COUNTER POS BILLING CARD (Seller / Cashier Employee)    */}
+        {/* ============================================================ */}
+        {isSellerOrEmployee && (
+          <View style={styles.posBillingCard}>
+            {/* Card Header */}
+            <View style={styles.posCardHeader}>
+              <View style={styles.posHeaderLeft}>
+                <View style={styles.posBadgePill}>
+                  <Icon name="bolt" size={13} color="#FFFFFF" style={{ marginRight: 5 }} />
+                  <Text style={styles.posBadgePillText}>FAST COUNTER POS</Text>
+                </View>
+                <Text style={styles.posCardTitle}>Direct Counter Checkout</Text>
+              </View>
+              <View style={styles.posRoleBadge}>
+                <Icon
+                  name={isEmployee ? 'id-badge' : 'star'}
+                  size={11}
+                  color="#0F766E"
+                  style={{ marginRight: 4 }}
+                />
+                <Text style={styles.posRoleBadgeText}>
+                  {isEmployee
+                    ? `Staff: ${activeEmployee?.name || 'Cashier'}`
+                    : (profile?.full_name || 'Store Owner')}
+                </Text>
+              </View>
+            </View>
+
+            <Text style={styles.posSubtitle}>
+              Customer at counter? Show the QR code or collect cash, then tap below to finish the bill instantly and load catalog for the next customer.
+            </Text>
+
+            {/* QR Code Section */}
+            {isUpiConfigured ? (
+              <View style={styles.posQrWrapper}>
+                <View style={styles.posQrCard}>
+                  <View style={styles.posQrHeaderRow}>
+                    <Icon name="qrcode" size={16} color="#007AFF" style={{ marginRight: 6 }} />
+                    <Text style={styles.posQrHeaderTitle}>⚡ Scan &amp; Pay Exact Bill</Text>
+                    <View style={styles.posQrAmountBadge}>
+                      <Text style={styles.posQrAmountBadgeText}>₹{totalAmount.toFixed(2)}</Text>
+                    </View>
+                  </View>
+
+                  <TouchableOpacity
+                    style={styles.posQrImageBtn}
+                    onPress={openQrImageViewer}
+                    activeOpacity={0.88}
+                    accessibilityLabel="Tap to enlarge QR Code full screen for customer"
+                  >
+                    <Image
+                      source={{ uri: displayedQrUri }}
+                      style={styles.posQrImage}
+                      resizeMode="contain"
+                    />
+                    <View style={styles.posQrEnlargeOverlay}>
+                      <Icon name="expand" size={10} color="#007AFF" style={{ marginRight: 4 }} />
+                      <Text style={styles.posQrEnlargeText}>Tap to Enlarge for Customer</Text>
+                    </View>
+                  </TouchableOpacity>
+
+                  {activeUpiId ? (
+                    <View style={styles.posUpiPill}>
+                      <Text style={styles.posUpiLabel}>UPI ID:</Text>
+                      <Text style={styles.posUpiValue} numberOfLines={1}>{activeUpiId}</Text>
+                      <TouchableOpacity
+                        style={styles.posCopyBtn}
+                        onPress={handleCopyUpiId}
+                        activeOpacity={0.8}
+                      >
+                        <Icon name={copiedUpi ? 'check' : 'clone'} size={11} color="#007AFF" />
+                        <Text style={styles.posCopyBtnText}>{copiedUpi ? 'Copied' : 'Copy'}</Text>
+                      </TouchableOpacity>
+                    </View>
+                  ) : null}
+
+                  <Text style={styles.posAcceptedAppsText}>
+                    Google Pay • PhonePe • Paytm • BHIM • Any UPI App
+                  </Text>
+                </View>
+              </View>
+            ) : (
+              <View style={styles.posNoUpiBox}>
+                <Icon name="info-circle" size={15} color="#D97706" style={{ marginRight: 6 }} />
+                <Text style={styles.posNoUpiText}>
+                  Store UPI is not configured. Customer can pay directly with Cash.
+                </Text>
+              </View>
+            )}
+
+            {/* Paid by Cash & Paid by UPI Buttons */}
+            <View style={styles.posActionButtonsRow}>
+              {/* Paid by Cash Button */}
+              <TouchableOpacity
+                style={[
+                  styles.posCashButton,
+                  loading && styles.posButtonDisabled,
+                ]}
+                onPress={() => promptFastOrderConfirmation('cash')}
+                disabled={loading}
+                activeOpacity={0.85}
+              >
+                <View style={styles.posCashIconCircle}>
+                  <Icon name="money" size={18} color="#FFFFFF" />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.posButtonLabel}>Paid by Cash</Text>
+                  <Text style={styles.posButtonAmount}>Collect ₹{totalAmount.toFixed(2)}</Text>
+                </View>
+                <Icon name="check-circle" size={16} color="#FFFFFF" style={{ opacity: 0.9 }} />
+              </TouchableOpacity>
+
+              {/* Paid by UPI Button */}
+              <TouchableOpacity
+                style={[
+                  styles.posUpiButton,
+                  (!isUpiConfigured || loading) && styles.posButtonDisabled,
+                ]}
+                onPress={() => {
+                  if (!isUpiConfigured) {
+                    showAlert(
+                      'UPI Not Configured',
+                      'Store seller has not set up UPI ID. Please collect cash payment.'
+                    );
+                    return;
+                  }
+                  promptFastOrderConfirmation('upi');
+                }}
+                disabled={loading || !isUpiConfigured}
+                activeOpacity={0.85}
+              >
+                <View style={styles.posUpiIconCircle}>
+                  <Icon name="qrcode" size={18} color="#FFFFFF" />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.posButtonLabel}>Paid by UPI</Text>
+                  <Text style={styles.posButtonAmount}>Received ₹{totalAmount.toFixed(2)}</Text>
+                </View>
+                <Icon name="bolt" size={16} color="#FFFFFF" style={{ opacity: 0.9 }} />
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.posFooterHintRow}>
+              <Icon name="lightbulb-o" size={13} color="#64748B" style={{ marginRight: 5 }} />
+              <Text style={styles.posFooterHintText}>
+                Confirms payment, prints receipt &amp; reloads catalog for next customer automatically.
+              </Text>
+            </View>
+          </View>
+        )}
 
         {/* Order Type Selector (Dine-in Default vs Parcel) */}
         <View style={styles.orderTypeCard}>
@@ -2088,7 +2624,7 @@ const CheckoutScreen = ({ navigation, route }) => {
                 <View>
                   <Text style={styles.upiCardTitle}>Instant UPI Payment</Text>
                   <Text style={styles.upiCardSubtitle}>
-                    Pay to: <Text style={{ fontWeight: '700', color: '#1E293B' }}>{payeeName}</Text>
+                    Pay to: <Text style={{ fontWeight: '700', color: '#1E293B' }}>{storeDisplayName}</Text>
                   </Text>
                 </View>
               </View>
@@ -2710,6 +3246,244 @@ const CheckoutScreen = ({ navigation, route }) => {
             </TouchableOpacity>
           </ScrollView>
         </SafeAreaView>
+      </Modal>
+
+      {/* FAST POS CONFIRMATION MODAL (Prompt before paid order) */}
+      <Modal
+        visible={showPosConfirmModal}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => {
+          if (!isProcessingPos) setShowPosConfirmModal(false);
+        }}
+      >
+        <View style={styles.posModalOverlay}>
+          <View style={styles.posModalCard}>
+            {/* Header */}
+            <View
+              style={[
+                styles.posModalHeader,
+                posPaymentMethod === 'cash' ? styles.posModalHeaderCash : styles.posModalHeaderUpi,
+              ]}
+            >
+              <View style={styles.posModalHeaderIcon}>
+                <Icon
+                  name={posPaymentMethod === 'cash' ? 'money' : 'qrcode'}
+                  size={24}
+                  color="#FFFFFF"
+                />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.posModalHeaderTitle}>
+                  {posPaymentMethod === 'cash' ? 'Confirm Paid by Cash' : 'Confirm Paid by UPI'}
+                </Text>
+                <Text style={styles.posModalHeaderSub}>
+                  {posPaymentMethod === 'cash'
+                    ? 'Customer paid cash at the counter'
+                    : 'Customer paid via UPI QR / App'}
+                </Text>
+              </View>
+            </View>
+
+            <ScrollView style={styles.posModalBody} keyboardShouldPersistTaps="handled">
+              {/* Total Amount Box */}
+              <View style={styles.posModalAmountBox}>
+                <Text style={styles.posModalAmountLabel}>Bill Total Amount</Text>
+                <Text style={styles.posModalAmountValue}>₹{totalAmount.toFixed(2)}</Text>
+                <Text style={styles.posModalItemsCount}>
+                  {cartItems.length} {cartItems.length === 1 ? 'item' : 'items'} in bill
+                </Text>
+              </View>
+
+              {/* Table / Counter selector */}
+              <Text style={styles.posModalInputLabel}>Counter / Table:</Text>
+              <View style={styles.posModalPickerWrap}>
+                <Picker
+                  selectedValue={posTableNo}
+                  onValueChange={(val) => setPosTableNo(val)}
+                  style={styles.picker}
+                >
+                  {tableOptions.map((opt) => (
+                    <Picker.Item
+                      key={opt}
+                      label={opt === 'Main counter' ? 'Main Counter (Self Pick-up)' : `Table #${opt}`}
+                      value={opt}
+                    />
+                  ))}
+                </Picker>
+              </View>
+
+              {/* Customer Name (Optional) */}
+              <Text style={styles.posModalInputLabel}>Customer Name (Optional):</Text>
+              <TextInput
+                style={styles.posModalInput}
+                placeholder="Walk-in Customer"
+                placeholderTextColor="#94A3B8"
+                value={posCustomerName}
+                onChangeText={setPosCustomerName}
+              />
+
+              {/* Customer Mobile (Optional) */}
+              <Text style={styles.posModalInputLabel}>Customer Mobile (Optional):</Text>
+              <TextInput
+                style={styles.posModalInput}
+                placeholder="10-digit mobile number"
+                placeholderTextColor="#94A3B8"
+                value={posCustomerMobile}
+                onChangeText={(t) => setPosCustomerMobile(t.replace(/[^0-9]/g, '').slice(0, 10))}
+                keyboardType="phone-pad"
+                maxLength={10}
+              />
+
+              {/* Print Receipt Toggle */}
+              <TouchableOpacity
+                style={styles.posPrintToggleRow}
+                onPress={() => setPosPrintReceipt(!posPrintReceipt)}
+                activeOpacity={0.8}
+              >
+                <Icon
+                  name={posPrintReceipt ? 'check-square' : 'square-o'}
+                  size={18}
+                  color={posPrintReceipt ? '#007AFF' : '#64748B'}
+                  style={{ marginRight: 8 }}
+                />
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.posPrintToggleLabel}>Print Bill Receipt</Text>
+                  <Text style={styles.posPrintToggleSub}>
+                    Automatically send receipt to thermal printer
+                  </Text>
+                </View>
+              </TouchableOpacity>
+
+              {/* Info Notice */}
+              <View style={styles.posModalNotice}>
+                <Icon name="check-circle" size={13} color="#10B981" style={{ marginRight: 6 }} />
+                <Text style={styles.posModalNoticeText}>
+                  Order will be marked as PAID. After completing, Catalog will automatically reload for the next customer.
+                </Text>
+              </View>
+            </ScrollView>
+
+            {/* Actions */}
+            <View style={styles.posModalActions}>
+              <TouchableOpacity
+                style={styles.posModalCancelBtn}
+                onPress={() => setShowPosConfirmModal(false)}
+                disabled={isProcessingPos}
+              >
+                <Text style={styles.posModalCancelBtnText}>Cancel</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[
+                  styles.posModalConfirmBtn,
+                  posPaymentMethod === 'cash'
+                    ? styles.posModalConfirmBtnCash
+                    : styles.posModalConfirmBtnUpi,
+                  isProcessingPos && styles.posButtonDisabled,
+                ]}
+                onPress={() => {
+                  handleFastPosOrder(posPaymentMethod, {
+                    printReceipt: posPrintReceipt,
+                    customerName: posCustomerName,
+                    customerMobile: posCustomerMobile,
+                    tableNo: posTableNo,
+                  });
+                }}
+                disabled={isProcessingPos}
+                activeOpacity={0.85}
+              >
+                {isProcessingPos ? (
+                  <ActivityIndicator size="small" color="#FFFFFF" />
+                ) : (
+                  <>
+                    <Icon name="check" size={15} color="#FFFFFF" style={{ marginRight: 6 }} />
+                    <Text style={styles.posModalConfirmBtnText}>
+                      Confirm &amp; Complete (₹{totalAmount.toFixed(2)})
+                    </Text>
+                  </>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* FAST POS SUCCESS MODAL (Fast Catalog Reload for Next Customer) */}
+      <Modal
+        visible={showPosSuccessModal}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => navigateToCatalog(posSuccessData?.order)}
+      >
+        <View style={styles.posSuccessOverlay}>
+          <View style={styles.posSuccessCard}>
+            <View style={styles.posSuccessIconCircle}>
+              <Icon name="check" size={32} color="#FFFFFF" />
+            </View>
+
+            <Text style={styles.posSuccessTitle}>Bill Paid &amp; Completed!</Text>
+            <Text style={styles.posSuccessSubtitle}>
+              Order #{posSuccessData?.order ? extractOrderNumbers(posSuccessData.order).orderNumber : ''} confirmed.
+            </Text>
+
+            <View style={styles.posSuccessDetailsBox}>
+              <View style={styles.posSuccessRow}>
+                <Text style={styles.posSuccessRowLabel}>Amount Paid:</Text>
+                <Text style={styles.posSuccessRowVal}>₹{posSuccessData?.amount ? posSuccessData.amount.toFixed(2) : totalAmount.toFixed(2)}</Text>
+              </View>
+              <View style={styles.posSuccessRow}>
+                <Text style={styles.posSuccessRowLabel}>Payment Mode:</Text>
+                <Text style={styles.posSuccessRowVal}>
+                  {posSuccessData?.method === 'Cash' ? '💵 Cash' : '⚡ UPI'} (PAID)
+                </Text>
+              </View>
+              <View style={styles.posSuccessRow}>
+                <Text style={styles.posSuccessRowLabel}>Receipt:</Text>
+                <Text style={styles.posSuccessRowVal}>
+                  {posPrintReceipt ? '🖨️ Sent to Printer' : 'Not Printed'}
+                </Text>
+              </View>
+            </View>
+
+            <View style={styles.posCountdownBanner}>
+              <Icon name="clock-o" size={13} color="#007AFF" style={{ marginRight: 5 }} />
+              <Text style={styles.posCountdownText}>
+                Loading catalog for next customer in {successCountdown}s...
+              </Text>
+            </View>
+
+            {/* Action Buttons */}
+            <TouchableOpacity
+              style={styles.posNextCustomerBtn}
+              onPress={() => navigateToCatalog(posSuccessData?.order)}
+              activeOpacity={0.85}
+            >
+              <Icon name="shopping-bag" size={16} color="#FFFFFF" style={{ marginRight: 8 }} />
+              <Text style={styles.posNextCustomerBtnText}>Next Customer (Catalog)</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.posViewOrderBtn}
+              onPress={() => {
+                setShowPosSuccessModal(false);
+                if (posSuccessData?.order) {
+                  navigation.navigate('OrderConfirmation', {
+                    order: posSuccessData.order,
+                    paymentReference: uniquePaymentCode,
+                    sellerId: resolvedSellerId,
+                    sellerName: resolvedSellerName,
+                    customerId: resolvedCustomerId,
+                  });
+                }
+              }}
+              activeOpacity={0.8}
+            >
+              <Icon name="file-text-o" size={13} color="#007AFF" style={{ marginRight: 6 }} />
+              <Text style={styles.posViewOrderBtnText}>View Receipt / Order Details</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
       </Modal>
 
       {/* Full-Screen QR & Item Media Viewer */}
@@ -4094,6 +4868,563 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 14,
     fontWeight: '700',
+  },
+
+  // ==========================================
+  // Fast POS Counter Billing Styles
+  // ==========================================
+  posBillingCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 14,
+    padding: 16,
+    marginHorizontal: 16,
+    marginTop: 14,
+    marginBottom: 8,
+    borderWidth: 1.5,
+    borderColor: '#0D9488',
+    shadowColor: '#0F766E',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.12,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  posCardHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+    flexWrap: 'wrap',
+    gap: 6,
+  },
+  posHeaderLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  posBadgePill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#0D9488',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+  },
+  posBadgePillText: {
+    color: '#FFFFFF',
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 0.5,
+  },
+  posCardTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#0F172A',
+  },
+  posRoleBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#CCFBF1',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 12,
+  },
+  posRoleBadgeText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#0F766E',
+  },
+  posSubtitle: {
+    fontSize: 12,
+    color: '#475569',
+    lineHeight: 17,
+    marginBottom: 12,
+  },
+  posQrWrapper: {
+    alignItems: 'center',
+    marginBottom: 14,
+  },
+  posQrCard: {
+    width: '100%',
+    backgroundColor: '#F8FAFC',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    padding: 12,
+    alignItems: 'center',
+  },
+  posQrHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    width: '100%',
+    marginBottom: 10,
+  },
+  posQrHeaderTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#1E293B',
+    flex: 1,
+  },
+  posQrAmountBadge: {
+    backgroundColor: '#0284C7',
+    paddingHorizontal: 10,
+    paddingVertical: 3,
+    borderRadius: 12,
+  },
+  posQrAmountBadgeText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  posQrImageBtn: {
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    padding: 10,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#CBD5E1',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.08,
+    shadowRadius: 4,
+    elevation: 2,
+    marginBottom: 8,
+  },
+  posQrImage: {
+    width: 170,
+    height: 170,
+  },
+  posQrEnlargeOverlay: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    backgroundColor: '#F0F9FF',
+    borderRadius: 6,
+  },
+  posQrEnlargeText: {
+    fontSize: 10.5,
+    fontWeight: '600',
+    color: '#007AFF',
+  },
+  posUpiPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F1F5F9',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 8,
+    marginTop: 4,
+    maxWidth: '100%',
+  },
+  posUpiLabel: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#64748B',
+    marginRight: 4,
+  },
+  posUpiValue: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#0F172A',
+    flexShrink: 1,
+  },
+  posCopyBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#E0F2FE',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+    marginLeft: 6,
+  },
+  posCopyBtnText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#007AFF',
+    marginLeft: 3,
+  },
+  posAcceptedAppsText: {
+    fontSize: 10,
+    color: '#64748B',
+    marginTop: 6,
+  },
+  posNoUpiBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFFBEB',
+    borderWidth: 1,
+    borderColor: '#FDE68A',
+    padding: 10,
+    borderRadius: 8,
+    marginBottom: 12,
+  },
+  posNoUpiText: {
+    fontSize: 12,
+    color: '#B45309',
+    flex: 1,
+  },
+  posActionButtonsRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginBottom: 8,
+  },
+  posCashButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#059669',
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+    borderRadius: 10,
+    shadowColor: '#059669',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  posUpiButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#0284C7',
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+    borderRadius: 10,
+    shadowColor: '#0284C7',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  posCashIconCircle: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 8,
+  },
+  posUpiIconCircle: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 8,
+  },
+  posButtonLabel: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  posButtonAmount: {
+    color: 'rgba(255, 255, 255, 0.9)',
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  posButtonDisabled: {
+    opacity: 0.5,
+  },
+  posFooterHintRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 4,
+  },
+  posFooterHintText: {
+    fontSize: 10.5,
+    color: '#64748B',
+    flex: 1,
+  },
+
+  // POS Confirm Modal
+  posModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(15, 23, 42, 0.65)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 16,
+  },
+  posModalCard: {
+    width: '100%',
+    maxWidth: 440,
+    maxHeight: '90%',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 16,
+    elevation: 8,
+  },
+  posModalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+  },
+  posModalHeaderCash: {
+    backgroundColor: '#059669',
+  },
+  posModalHeaderUpi: {
+    backgroundColor: '#0284C7',
+  },
+  posModalHeaderIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255, 255, 255, 0.22)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+  },
+  posModalHeaderTitle: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: '#FFFFFF',
+  },
+  posModalHeaderSub: {
+    fontSize: 11.5,
+    color: 'rgba(255, 255, 255, 0.9)',
+    marginTop: 1,
+  },
+  posModalBody: {
+    padding: 16,
+  },
+  posModalAmountBox: {
+    backgroundColor: '#F8FAFC',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    padding: 12,
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  posModalAmountLabel: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#64748B',
+    textTransform: 'uppercase',
+  },
+  posModalAmountValue: {
+    fontSize: 26,
+    fontWeight: '900',
+    color: '#0F172A',
+    marginVertical: 2,
+  },
+  posModalItemsCount: {
+    fontSize: 11,
+    color: '#64748B',
+  },
+  posModalInputLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#334155',
+    marginBottom: 5,
+    marginTop: 8,
+  },
+  posModalPickerWrap: {
+    borderWidth: 1,
+    borderColor: '#CBD5E1',
+    borderRadius: 8,
+    backgroundColor: '#FFFFFF',
+    overflow: 'hidden',
+  },
+  posModalInput: {
+    borderWidth: 1,
+    borderColor: '#CBD5E1',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    fontSize: 13,
+    color: '#0F172A',
+    backgroundColor: '#FFFFFF',
+  },
+  posPrintToggleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F0F9FF',
+    borderWidth: 1,
+    borderColor: '#BAE6FD',
+    borderRadius: 8,
+    padding: 10,
+    marginTop: 14,
+  },
+  posPrintToggleLabel: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#0369A1',
+  },
+  posPrintToggleSub: {
+    fontSize: 10.5,
+    color: '#0284C7',
+    marginTop: 1,
+  },
+  posModalNotice: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#ECFDF5',
+    padding: 8,
+    borderRadius: 6,
+    marginTop: 12,
+    marginBottom: 4,
+  },
+  posModalNoticeText: {
+    fontSize: 11,
+    color: '#065F46',
+    flex: 1,
+    lineHeight: 15,
+  },
+  posModalActions: {
+    flexDirection: 'row',
+    borderTopWidth: 1,
+    borderTopColor: '#E2E8F0',
+    padding: 12,
+    gap: 10,
+    backgroundColor: '#FFFFFF',
+  },
+  posModalCancelBtn: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#F1F5F9',
+  },
+  posModalCancelBtnText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#475569',
+  },
+  posModalConfirmBtn: {
+    flex: 2,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 8,
+    borderRadius: 8,
+  },
+  posModalConfirmBtnCash: {
+    backgroundColor: '#059669',
+  },
+  posModalConfirmBtnUpi: {
+    backgroundColor: '#0284C7',
+  },
+  posModalConfirmBtnText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#FFFFFF',
+  },
+
+  // POS Success Modal
+  posSuccessOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(15, 23, 42, 0.7)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  posSuccessCard: {
+    width: '100%',
+    maxWidth: 380,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 18,
+    padding: 22,
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.2,
+    shadowRadius: 16,
+    elevation: 10,
+  },
+  posSuccessIconCircle: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    backgroundColor: '#10B981',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 12,
+  },
+  posSuccessTitle: {
+    fontSize: 19,
+    fontWeight: '900',
+    color: '#0F172A',
+    marginBottom: 4,
+  },
+  posSuccessSubtitle: {
+    fontSize: 13,
+    color: '#64748B',
+    textAlign: 'center',
+    marginBottom: 14,
+  },
+  posSuccessDetailsBox: {
+    width: '100%',
+    backgroundColor: '#F8FAFC',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    padding: 12,
+    marginBottom: 12,
+  },
+  posSuccessRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingVertical: 3,
+  },
+  posSuccessRowLabel: {
+    fontSize: 12,
+    color: '#64748B',
+  },
+  posSuccessRowVal: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#0F172A',
+  },
+  posCountdownBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#EFF6FF',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 20,
+    marginBottom: 14,
+  },
+  posCountdownText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#1D4ED8',
+  },
+  posNextCustomerBtn: {
+    width: '100%',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#0D9488',
+    paddingVertical: 13,
+    borderRadius: 10,
+    marginBottom: 8,
+  },
+  posNextCustomerBtnText: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: '#FFFFFF',
+  },
+  posViewOrderBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 8,
+  },
+  posViewOrderBtnText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#007AFF',
   },
 });
 

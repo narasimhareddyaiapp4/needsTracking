@@ -16,13 +16,13 @@ import * as Clipboard from 'expo-clipboard';
 import { supabase, getActiveQrCode, updateOrderStatus, extractMerchantUpi } from '../services/supabase';
 import StoreNavigationFooter from '../components/StoreNavigationFooter';
 import FullScreenImageViewer from '../components/FullScreenImageViewer';
-import { normalizeUpiId, isGenericQrName } from '../services/qrScanService';
+import { normalizeUpiId, isGenericQrName, resolveUploadedQrDetails, buildUpiPaymentUri } from '../services/qrScanService';
 
 const UpiQrScreen = ({ navigation, route }) => {
   const { cart, totalAmount: passedAmount, shippingAddress, order, sellerId: paramSellerId, sellerName: paramSellerName, customerId: paramCustomerId } = route?.params || {};
   const [activeQrImageUrl, setActiveQrImageUrl] = useState(null);
   const [payeeUpiId, setPayeeUpiId] = useState('');
-  const [payeeName, setPayeeName] = useState('Merchant Store');
+  const [payeeName, setPayeeName] = useState('');
   const [loading, setLoading] = useState(true);
   const [copiedUpi, setCopiedUpi] = useState(false);
   const [qrTab, setQrTab] = useState('dynamic'); // 'dynamic' | 'profile'
@@ -93,7 +93,6 @@ const UpiQrScreen = ({ navigation, route }) => {
           } catch (_) {}
 
           if (prof) {
-            if (prof.full_name) setPayeeName(prof.full_name);
             const normProf =
               normalizeUpiId(prof.upi_id) ||
               normalizeUpiId(extractMerchantUpi(prof.media_urls));
@@ -103,18 +102,21 @@ const UpiQrScreen = ({ navigation, route }) => {
             }
           }
 
-          // 2. Active QR code record
+          // 2. Active QR code record (strictly extracts details from uploaded QR code)
           const qrCode = await getActiveQrCode(targetUserId);
           if (qrCode) {
             const url = qrCode.qr_image_url || qrCode.qr_code_url;
             setActiveQrImageUrl(url);
-            if (!foundUpi && qrCode.name && !isGenericQrName(qrCode.name)) {
-              const normQr = normalizeUpiId(qrCode.name);
-              if (normQr && !isGenericQrName(normQr)) {
-                foundUpi = normQr;
+            try {
+              const qrDetails = await resolveUploadedQrDetails(qrCode);
+              if (qrDetails?.upiId) {
+                foundUpi = qrDetails.upiId;
                 setPayeeUpiId(foundUpi);
               }
-            }
+              if (qrDetails?.payeeName) {
+                setPayeeName(qrDetails.payeeName);
+              }
+            } catch (_) {}
           }
 
           // 3. Current user metadata fallback
@@ -138,8 +140,17 @@ const UpiQrScreen = ({ navigation, route }) => {
 
   const activeVpa = payeeUpiId || 'store@okaxis';
   const orderRef = order?.order_number || (order?.id ? order.id.substring(0, 8) : 'Order');
-  const dynamicUpiUri = `upi://pay?pa=${encodeURIComponent(activeVpa)}&pn=${encodeURIComponent(payeeName)}&am=${Number(amount).toFixed(2)}&cu=INR&tn=${encodeURIComponent('Bill Order ' + orderRef)}`;
-  const dynamicQrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&margin=8&data=${encodeURIComponent(dynamicUpiUri)}`;
+  const dynamicUpiUri = activeVpa
+    ? buildUpiPaymentUri({
+        upiId: activeVpa,
+        payeeName: payeeName || '',
+        amount: Number(amount) > 0 ? Number(amount) : undefined,
+        note: 'Bill Order ' + orderRef,
+      })
+    : '';
+  const dynamicQrImageUrl = dynamicUpiUri
+    ? `https://api.qrserver.com/v1/create-qr-code/?size=300x300&margin=8&data=${encodeURIComponent(dynamicUpiUri)}`
+    : null;
 
   const displayedQrUrl =
     qrTab === 'profile' && activeQrImageUrl ? activeQrImageUrl : dynamicQrImageUrl;

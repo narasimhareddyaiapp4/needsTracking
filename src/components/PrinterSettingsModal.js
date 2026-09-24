@@ -586,6 +586,89 @@ const PrinterSettingsModal = ({ visible, onClose }) => {
                     thumbColor={config.printDynamicQr !== false ? '#007AFF' : '#F1F5F9'}
                   />
                 </View>
+
+                <View style={styles.settingDivider} />
+
+                {/* Print Order Barcode (Code-128) Toggle */}
+                <View style={styles.switchRow}>
+                  <View style={{ flex: 1, marginRight: 12 }}>
+                    <Text style={styles.switchLabel}>Print Order Barcode (Code-128)</Text>
+                    <Text style={styles.switchDescription}>
+                      Print scannable 1D barcode of the order number on receipts for fast tracking using mobile phone cameras or barcode scanners.
+                    </Text>
+                  </View>
+                  <Switch
+                    value={config.printOrderBarcode !== false}
+                    onValueChange={(val) => setConfig({ ...config, printOrderBarcode: val })}
+                    trackColor={{ false: '#CBD5E1', true: '#93C5FD' }}
+                    thumbColor={config.printOrderBarcode !== false ? '#007AFF' : '#F1F5F9'}
+                  />
+                </View>
+
+                <View style={styles.settingDivider} />
+
+                {/* QR & Barcode Display Size Setting */}
+                <View style={{ marginTop: 4 }}>
+                  <Text style={styles.switchLabel}>Barcode & QR Code Display Size</Text>
+                  <Text style={styles.switchDescription}>
+                    Larger size ensures mobile phones (Google Pay, PhonePe, Paytm, camera) scan the code instantly without blur or focus issues.
+                  </Text>
+                  <View style={styles.qrSizeRow}>
+                    <TouchableOpacity
+                      style={[
+                        styles.qrSizeOption,
+                        config.qrCodeSize === 'normal' && styles.qrSizeOptionSelected,
+                      ]}
+                      onPress={() => setConfig({ ...config, qrCodeSize: 'normal' })}
+                    >
+                      <Text
+                        style={[
+                          styles.qrSizeOptionText,
+                          config.qrCodeSize === 'normal' && styles.qrSizeOptionTextSelected,
+                        ]}
+                      >
+                        Standard
+                      </Text>
+                      <Text style={styles.qrSizeOptionSub}>Compact</Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                      style={[
+                        styles.qrSizeOption,
+                        (!config.qrCodeSize || config.qrCodeSize === 'large') && styles.qrSizeOptionSelected,
+                      ]}
+                      onPress={() => setConfig({ ...config, qrCodeSize: 'large' })}
+                    >
+                      <Text
+                        style={[
+                          styles.qrSizeOptionText,
+                          (!config.qrCodeSize || config.qrCodeSize === 'large') && styles.qrSizeOptionTextSelected,
+                        ]}
+                      >
+                        Large
+                      </Text>
+                      <Text style={styles.qrSizeOptionSub}>Recommended</Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                      style={[
+                        styles.qrSizeOption,
+                        config.qrCodeSize === 'extra_large' && styles.qrSizeOptionSelected,
+                      ]}
+                      onPress={() => setConfig({ ...config, qrCodeSize: 'extra_large' })}
+                    >
+                      <Text
+                        style={[
+                          styles.qrSizeOptionText,
+                          config.qrCodeSize === 'extra_large' && styles.qrSizeOptionTextSelected,
+                        ]}
+                      >
+                        Extra Large
+                      </Text>
+                      <Text style={styles.qrSizeOptionSub}>Maximum</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
               </View>
 
               {/* Test Print Slip */}
@@ -785,6 +868,40 @@ const styles = StyleSheet.create({
   },
   paperOptionSub: {
     fontSize: 11,
+    color: '#94A3B8',
+    marginTop: 2,
+    textAlign: 'center',
+  },
+  qrSizeRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: 8,
+  },
+  qrSizeOption: {
+    flex: 1,
+    backgroundColor: '#F8FAFC',
+    borderWidth: 1.5,
+    borderColor: '#E2E8F0',
+    borderRadius: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 4,
+    marginHorizontal: 3,
+    alignItems: 'center',
+  },
+  qrSizeOptionSelected: {
+    borderColor: '#007AFF',
+    backgroundColor: '#F0F7FF',
+  },
+  qrSizeOptionText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#334155',
+  },
+  qrSizeOptionTextSelected: {
+    color: '#007AFF',
+  },
+  qrSizeOptionSub: {
+    fontSize: 10,
     color: '#94A3B8',
     marginTop: 2,
     textAlign: 'center',

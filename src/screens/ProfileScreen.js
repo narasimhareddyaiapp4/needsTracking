@@ -239,6 +239,32 @@ const ProfileScreen = ({ navigation, route }) => {
     }
   };
 
+  const handleTogglePrintOrderBarcode = async (val) => {
+    try {
+      const updated = { ...(printerConfig || DEFAULT_PRINTER_CONFIG), printOrderBarcode: val };
+      setPrinterConfig(updated);
+      await savePrinterConfig(updated);
+      showAlert(
+        'Order Barcode Updated',
+        val
+          ? 'Scannable Code-128 order barcode will now appear on receipts for mobile phone cameras & scanners.'
+          : 'Order barcode is turned OFF on receipts.'
+      );
+    } catch (err) {
+      console.warn('Error updating printOrderBarcode in profile:', err);
+    }
+  };
+
+  const handleSelectQrCodeSize = async (size) => {
+    try {
+      const updated = { ...(printerConfig || DEFAULT_PRINTER_CONFIG), qrCodeSize: size };
+      setPrinterConfig(updated);
+      await savePrinterConfig(updated);
+    } catch (err) {
+      console.warn('Error updating qrCodeSize in profile:', err);
+    }
+  };
+
   const syncTaxSettingsToAuth = async (cfg) => {
     try {
       await supabase.auth.updateUser({
@@ -3059,6 +3085,72 @@ const ProfileScreen = ({ navigation, route }) => {
               trackColor={{ false: '#CBD5E1', true: '#93C5FD' }}
               thumbColor={printerConfig?.printDynamicQr !== false ? '#007AFF' : '#F1F5F9'}
             />
+          </View>
+
+          <View style={styles.printerDivider} />
+
+          {/* Toggle: Print Order Barcode (Code-128) */}
+          <View style={styles.printerToggleRow}>
+            <View style={{ flex: 1, marginRight: 12 }}>
+              <Text style={styles.printerToggleTitle}>Print Order Barcode (Code-128)</Text>
+              <Text style={styles.printerToggleSub}>
+                Print scannable 1D barcode of the order number on receipts for fast tracking using phone camera or scanner.
+              </Text>
+            </View>
+            <Switch
+              value={printerConfig?.printOrderBarcode !== false}
+              onValueChange={handleTogglePrintOrderBarcode}
+              trackColor={{ false: '#CBD5E1', true: '#93C5FD' }}
+              thumbColor={printerConfig?.printOrderBarcode !== false ? '#007AFF' : '#F1F5F9'}
+            />
+          </View>
+
+          <View style={styles.printerDivider} />
+
+          {/* Barcode & QR Display Size */}
+          <View style={{ marginVertical: 6 }}>
+            <Text style={styles.printerToggleTitle}>Barcode & QR Code Display Size</Text>
+            <Text style={styles.printerToggleSub}>
+              Select size to ensure clear scanning from mobile phone cameras (Google Pay, PhonePe, Paytm).
+            </Text>
+            <View style={{ flexDirection: 'row', marginTop: 8 }}>
+              {['normal', 'large', 'extra_large'].map((s) => {
+                const isSelected = (!printerConfig?.qrCodeSize && s === 'large') || printerConfig?.qrCodeSize === s;
+                const labels = {
+                  normal: 'Standard',
+                  large: 'Large (Recommended)',
+                  extra_large: 'Extra Large',
+                };
+                return (
+                  <TouchableOpacity
+                    key={s}
+                    style={{
+                      flex: 1,
+                      backgroundColor: isSelected ? '#F0F7FF' : '#F8FAFC',
+                      borderWidth: 1.5,
+                      borderColor: isSelected ? '#007AFF' : '#E2E8F0',
+                      borderRadius: 8,
+                      paddingVertical: 8,
+                      paddingHorizontal: 4,
+                      marginHorizontal: 3,
+                      alignItems: 'center',
+                    }}
+                    onPress={() => handleSelectQrCodeSize(s)}
+                  >
+                    <Text
+                      style={{
+                        fontSize: 11,
+                        fontWeight: '700',
+                        color: isSelected ? '#007AFF' : '#334155',
+                        textAlign: 'center',
+                      }}
+                    >
+                      {labels[s]}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
           </View>
 
           {/* Full Printer Setup Modal Button */}

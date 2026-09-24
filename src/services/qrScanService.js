@@ -99,25 +99,63 @@ export function parseUpiString(text) {
       return parseUpiString(upiMatch[0]);
     }
 
-    // Extract VPA from NPCI tag (e.g. 0009org.npci.upi0116store@okhdfcbank)
     let extractedUpi = '';
-    const npciMatch = trimmed.match(/org\.npci\.upi(?:01)?(?:\d{2})?([a-zA-Z0-9.\-_]{2,64}@[a-zA-Z]{2,30})/i);
-    if (npciMatch) {
-      extractedUpi = npciMatch[1].trim();
-    } else {
-      const genericVpa = trimmed.match(/(?:^|[^a-zA-Z0-9.\-_])([a-zA-Z0-9][a-zA-Z0-9.\-_]{1,63}@[a-zA-Z]{2,30})(?:[^a-zA-Z0-9.\-_]|$)/);
-      if (genericVpa) {
-        extractedUpi = genericVpa[1].trim();
+    let extractedPayee = '';
+
+    // TLV parser for EMVCo specifications
+    const parseEmvTags = (str) => {
+      const map = {};
+      let i = 0;
+      while (i + 4 <= str.length) {
+        const tag = str.substring(i, i + 2);
+        const len = parseInt(str.substring(i + 2, i + 4), 10);
+        if (isNaN(len) || len < 0 || i + 4 + len > str.length) break;
+        map[tag] = str.substring(i + 4, i + 4 + len);
+        i += 4 + len;
+      }
+      return map;
+    };
+
+    try {
+      const tags = parseEmvTags(trimmed);
+      // Merchant Account Information tags 26 to 51
+      for (let t = 26; t <= 51; t++) {
+        const val = tags[String(t)];
+        if (val) {
+          const subtags = parseEmvTags(val);
+          if (subtags['01'] && subtags['01'].includes('@')) {
+            extractedUpi = subtags['01'].trim();
+            break;
+          }
+        }
+      }
+      if (tags['59']) {
+        extractedPayee = tags['59'].trim();
+        // Clean tag boundary bleed if len had city code
+        if (extractedPayee.endsWith('600')) extractedPayee = extractedPayee.slice(0, -3);
+      }
+    } catch (_) {}
+
+    // Fallback regex if TLV tags failed
+    if (!extractedUpi) {
+      const npciMatch = trimmed.match(/org\.npci\.upi(?:01)?(?:\d{2})?([a-zA-Z0-9.\-_]{2,64}@[a-zA-Z]{2,30})/i);
+      if (npciMatch) {
+        extractedUpi = npciMatch[1].trim();
+      } else {
+        const genericVpa = trimmed.match(/([a-zA-Z0-9][a-zA-Z0-9.\-_]{1,63}@[a-zA-Z]{2,30})/);
+        if (genericVpa) {
+          extractedUpi = genericVpa[1].trim();
+        }
       }
     }
 
-    // Extract Merchant Name from EMV tag 59 (59<len><name>)
-    let extractedPayee = '';
-    const payeeMatch = trimmed.match(/59(\d{2})([A-Za-z0-9\s&.,'-]+)/);
-    if (payeeMatch) {
-      const len = parseInt(payeeMatch[1], 10);
-      if (!isNaN(len) && len > 0) {
-        extractedPayee = payeeMatch[2].substring(0, len).trim();
+    if (!extractedPayee) {
+      const payeeMatch = trimmed.match(/59(\d{2})([A-Za-z0-9\s&.,'-]+)/);
+      if (payeeMatch) {
+        const len = parseInt(payeeMatch[1], 10);
+        if (!isNaN(len) && len > 0) {
+          extractedPayee = payeeMatch[2].substring(0, len).trim();
+        }
       }
     }
 
@@ -820,3 +858,71 @@ export async function decodeQrFromImage(imageUri) {
     error: 'No QR code could be detected in this image. Please ensure the QR code is clearly visible, in focus, and not cropped.',
   };
 }
+
+/**
+ * Resolves payment details strictly from an uploaded QR code record or QR image.
+ * Guarantees that payee name is extracted ONLY from the uploaded QR code details
+ * and NEVER from the seller's profile name.
+ *
+ * @param {object} qrRecord - Row from user_qr_codes or object with { qr_image_url, name }
+ * @returns {Promise<{ upiId: string, payeeName: string, rawText: string, isUpi: boolean }>}
+ */
+export async function resolveUploadedQrDetails(qrRecord) {
+  if (!qrRecord) {
+    return { upiId: '', payeeName: '', rawText: '', isUpi: false };
+  }
+
+  let upiId = '';
+  let payeeName = '';
+  let rawText = '';
+
+  // 1. If qrRecord has explicit columns (payee_name, upi_id, raw_qr_data)
+  if (qrRecord.upi_id) upiId = normalizeUpiId(qrRecord.upi_id) || '';
+  if (qrRecord.payee_name && !isGenericQrName(qrRecord.payee_name) && qrRecord.payee_name !== 'Store Merchant') {
+    payeeName = String(qrRecord.payee_name).trim();
+  }
+  if (qrRecord.raw_qr_data) rawText = qrRecord.raw_qr_data;
+
+  // 2. Parse qrRecord.name (often holds raw QR text, upi://pay URI, BharatQR string, or VPA)
+  if (qrRecord.name && (!upiId || !payeeName)) {
+    const parsed = parseUpiString(qrRecord.name);
+    if (!upiId && parsed?.upiId && !isGenericQrName(parsed.upiId)) {
+      upiId = normalizeUpiId(parsed.upiId);
+    }
+    if (!payeeName && parsed?.payeeName && !isGenericQrName(parsed.payeeName) && parsed.payeeName !== 'Store Merchant') {
+      payeeName = String(parsed.payeeName).trim();
+    }
+    if (!rawText && parsed?.rawText) {
+      rawText = parsed.rawText;
+    }
+  }
+
+  // 3. If details (especially payeeName or upiId) are still missing, decode from the uploaded QR image URL
+  const imageUrl = qrRecord.qr_image_url || qrRecord.qr_code_url;
+  if (imageUrl && (!upiId || !payeeName)) {
+    try {
+      const scan = await decodeQrFromImage(imageUrl);
+      if (scan?.success) {
+        if (!upiId && scan.upiId && !isGenericQrName(scan.upiId)) {
+          upiId = normalizeUpiId(scan.upiId);
+        }
+        if (!payeeName && scan.payeeName && !isGenericQrName(scan.payeeName) && scan.payeeName !== 'Store Merchant') {
+          payeeName = String(scan.payeeName).trim();
+        }
+        if (!rawText && scan.rawText) {
+          rawText = scan.rawText;
+        }
+      }
+    } catch (err) {
+      console.warn('Notice resolving uploaded QR image details:', err);
+    }
+  }
+
+  return {
+    upiId: upiId || '',
+    payeeName: payeeName || '', // Strictly from uploaded QR details only, never profile name!
+    rawText: rawText || '',
+    isUpi: Boolean(upiId),
+  };
+}
+

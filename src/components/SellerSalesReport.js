@@ -12,7 +12,7 @@ import {
 import Svg, { G, Path, Rect, Text as SvgText, Circle, Line } from 'react-native-svg';
 import Icon from 'react-native-vector-icons/FontAwesome';
 import UniversalDateTimePicker from './UniversalDateTimePicker';
-import { getSellerOrdersForReport } from '../services/supabase';
+import { getSellerOrdersForReport, supabase } from '../services/supabase';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -73,6 +73,7 @@ function formatHourLabel(h) {
 }
 
 const SellerSalesReport = ({ sellerId, sellerName, onClose }) => {
+  const [activeSellerId, setActiveSellerId] = useState(sellerId || null);
   const [selectedPreset, setSelectedPreset] = useState('today');
   const [chartType, setChartType] = useState('donut'); // 'donut' | 'pie'
   const [startDate, setStartDate] = useState(() => {
@@ -93,6 +94,26 @@ const SellerSalesReport = ({ sellerId, sellerName, onClose }) => {
   const [loading, setLoading] = useState(true);
   const [selectedHourDetails, setSelectedHourDetails] = useState(null);
   const [selectedProductDetails, setSelectedProductDetails] = useState(null);
+
+  // Auto-resolve sellerId from auth if not passed directly
+  useEffect(() => {
+    if (sellerId) {
+      setActiveSellerId(sellerId);
+    } else {
+      (async () => {
+        try {
+          const { data: { user } } = await supabase.auth.getUser();
+          if (user?.id) {
+            setActiveSellerId(user.id);
+          } else {
+            setLoading(false);
+          }
+        } catch (_) {
+          setLoading(false);
+        }
+      })();
+    }
+  }, [sellerId]);
 
   // Apply preset dates
   const handleSelectPreset = (presetId) => {
@@ -124,12 +145,16 @@ const SellerSalesReport = ({ sellerId, sellerName, onClose }) => {
     }
   };
 
-  // Fetch report orders whenever sellerId, startDate, or endDate changes
+  // Fetch report orders whenever activeSellerId, startDate, or endDate changes
   const loadReportData = useCallback(async () => {
-    if (!sellerId) return;
+    const targetId = activeSellerId || sellerId;
+    if (!targetId) {
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     try {
-      const data = await getSellerOrdersForReport(sellerId, { startDate, endDate });
+      const data = await getSellerOrdersForReport(targetId, { startDate, endDate });
       setOrders(data || []);
     } catch (err) {
       console.warn('Error loading sales report data:', err);
@@ -137,11 +162,13 @@ const SellerSalesReport = ({ sellerId, sellerName, onClose }) => {
     } finally {
       setLoading(false);
     }
-  }, [sellerId, startDate, endDate]);
+  }, [activeSellerId, sellerId, startDate, endDate]);
 
   useEffect(() => {
-    loadReportData();
-  }, [loadReportData]);
+    if (activeSellerId || sellerId) {
+      loadReportData();
+    }
+  }, [activeSellerId, sellerId, loadReportData]);
 
   // Exclude cancelled orders from gross sales calculation
   const validOrders = useMemo(() => {
