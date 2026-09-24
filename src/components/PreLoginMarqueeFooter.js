@@ -27,8 +27,7 @@ export default function PreLoginMarqueeFooter({
   style = null,
 }) {
   const [adminContact, setAdminContact] = useState(getAdminContactSync());
-  const [containerWidth, setContainerWidth] = useState(SCREEN_WIDTH || 360);
-  const [textWidth, setTextWidth] = useState(600);
+  const [setWidth, setSetWidth] = useState(1600);
 
   // Marquee horizontal scroll animation
   const scrollAnim = useRef(new Animated.Value(0)).current;
@@ -71,23 +70,105 @@ export default function PreLoginMarqueeFooter({
     };
   }, []);
 
-  // Marquee scrolling animation loop
+  // Platform features showcased with icons & emojis
+  const platformFeatures = [
+    {
+      id: 'digitalize',
+      icon: 'rocket',
+      color: '#38BDF8',
+      bgColor: 'rgba(56, 189, 248, 0.18)',
+      emoji: '🚀',
+      title: 'Digitalize Your Business',
+      desc: 'Instant Online Store Setup',
+    },
+    {
+      id: 'products',
+      icon: 'cube',
+      color: '#60A5FA',
+      bgColor: 'rgba(96, 165, 250, 0.18)',
+      emoji: '📦',
+      title: 'Products & Barcode Catalog',
+      desc: 'Mobile Scanner & Variants',
+    },
+    {
+      id: 'orders',
+      icon: 'shopping-cart',
+      color: '#34D399',
+      bgColor: 'rgba(52, 211, 153, 0.18)',
+      emoji: '🛒',
+      title: 'Real-Time Orders',
+      desc: 'Live Audio & Instant Bell Alerts',
+    },
+    {
+      id: 'delivery',
+      icon: 'motorcycle',
+      color: '#F472B6',
+      bgColor: 'rgba(244, 114, 182, 0.18)',
+      emoji: '🚚',
+      title: 'Live GPS Delivery Tracking',
+      desc: 'Hyperlocal Map & Rider Location',
+    },
+    {
+      id: 'billing',
+      icon: 'print',
+      color: '#FBBF24',
+      bgColor: 'rgba(251, 191, 36, 0.18)',
+      emoji: '🧾',
+      title: 'Thermal POS Billing',
+      desc: 'Bluetooth 58/80mm Receipts & Tax',
+    },
+    {
+      id: 'inventory',
+      icon: 'sliders',
+      color: '#A78BFA',
+      bgColor: 'rgba(167, 139, 250, 0.18)',
+      emoji: '📊',
+      title: 'Smart Stock & Inventory',
+      desc: 'Auto Stock Counters & Low Alerts',
+    },
+    {
+      id: 'store_qr',
+      icon: 'qrcode',
+      color: '#FB923C',
+      bgColor: 'rgba(251, 146, 60, 0.18)',
+      emoji: '📱',
+      title: 'Store QR Menus',
+      desc: 'Contactless Dine-In & Self-Order',
+    },
+    {
+      id: 'demo',
+      icon: 'calendar-check-o',
+      color: '#4ADE80',
+      bgColor: 'rgba(74, 222, 128, 0.18)',
+      emoji: '🎯',
+      title: 'Book Free Live Demo',
+      desc: 'Schedule With Admin Today',
+    },
+    {
+      id: 'admin',
+      icon: 'phone',
+      color: '#38BDF8',
+      bgColor: 'rgba(56, 189, 248, 0.18)',
+      emoji: '📞',
+      title: 'Admin Desk',
+      desc: adminContact.displayMobile,
+    },
+  ];
+
+  // Continuous seamless loop scrolling animation
   useEffect(() => {
     if (animRef.current) {
       animRef.current.stop();
     }
+    if (setWidth <= 0) return;
 
-    const startX = containerWidth > 0 ? containerWidth : SCREEN_WIDTH;
-    const endX = -Math.max(textWidth, 500);
-    const totalDistance = startX - endX;
-    // Speed: ~40px per second for smooth easy readability
-    const duration = Math.max(8000, totalDistance * 26);
-
-    scrollAnim.setValue(startX);
+    scrollAnim.setValue(0);
+    // Smooth reading speed: ~35px per second
+    const duration = Math.max(14000, setWidth * 28);
 
     animRef.current = Animated.loop(
       Animated.timing(scrollAnim, {
-        toValue: endX,
+        toValue: -setWidth,
         duration: duration,
         easing: Easing.linear,
         useNativeDriver: Platform.OS !== 'web',
@@ -100,38 +181,60 @@ export default function PreLoginMarqueeFooter({
         animRef.current.stop();
       }
     };
-  }, [containerWidth, textWidth]);
+  }, [setWidth]);
 
-  const handleContainerLayout = (e) => {
+  const handleSetLayout = (e) => {
     const w = e.nativeEvent.layout.width;
-    if (w && Math.abs(w - containerWidth) > 5) {
-      setContainerWidth(w);
+    if (w > 100 && Math.abs(w - setWidth) > 8) {
+      setSetWidth(w);
     }
   };
 
-  const handleTextLayout = (e) => {
-    const w = e.nativeEvent.layout.width;
-    if (w && Math.abs(w - textWidth) > 5) {
-      setTextWidth(w);
-    }
+  const handleFeaturePress = (feature) => {
+    const msg = `Hello Admin, I am interested in: "${feature.title} (${feature.desc})" to digitalize my business setup on NeedsTracker.`;
+    openAdminWhatsApp(msg);
   };
 
-  const marqueeMessage = `🚀 Digitalize Your Business Setup • Schedule a Free Live Demo Today • Hyperlocal GPS Order & Delivery Tracking • Contact Admin: ${adminContact.displayMobile} • Instant WhatsApp & Call Support • Transform your local store to an online marketplace • `;
+  const renderFeaturePills = (setIndex, onLayoutCallback = null) => (
+    <View
+      key={`feature-set-${setIndex}`}
+      style={styles.setRow}
+      onLayout={onLayoutCallback}
+    >
+      {platformFeatures.map((item, idx) => (
+        <TouchableOpacity
+          key={`pill-${setIndex}-${idx}`}
+          style={styles.tickerPill}
+          activeOpacity={0.75}
+          onPress={() => handleFeaturePress(item)}
+        >
+          <View style={[styles.pillIconBox, { backgroundColor: item.bgColor, borderColor: item.color }]}>
+            <Icon name={item.icon} size={11} color={item.color} />
+          </View>
+          <Text style={styles.pillEmoji}>{item.emoji}</Text>
+          <Text style={[styles.pillTitle, { color: item.color }]}>{item.title}</Text>
+          <Text style={styles.pillDesc}>• {item.desc}</Text>
+          <View style={styles.pillDot} />
+        </TouchableOpacity>
+      ))}
+    </View>
+  );
 
   return (
-    <View style={[styles.wrapper, style]} onLayout={handleContainerLayout}>
+    <View style={[styles.wrapper, style]}>
       {/* 1. Moving Marquee Banner Bar */}
-      <TouchableOpacity
-        style={styles.marqueeContainer}
-        activeOpacity={0.9}
-        onPress={() => openAdminWhatsApp()}
-        accessibilityLabel="Digitalize business and contact admin marquee"
-      >
-        <View style={styles.badgeBox}>
-          <Icon name="bolt" size={11} color="#FFFFFF" style={{ marginRight: 3 }} />
-          <Text style={styles.badgeText}>SETUP & DEMO</Text>
-        </View>
+      <View style={styles.marqueeContainer}>
+        {/* Left Fixed Tag Badge */}
+        <TouchableOpacity
+          style={styles.badgeBox}
+          activeOpacity={0.8}
+          onPress={() => openAdminWhatsApp('Hello Admin, I would like to book a free live demo for business digitalization.')}
+        >
+          <Icon name="bolt" size={11} color="#FFFFFF" style={{ marginRight: 4 }} />
+          <Text style={styles.badgeText}>FEATURES & DEMO</Text>
+        </TouchableOpacity>
 
+        {/* Ticker Moving Viewport */}
         <View style={styles.tickerViewport}>
           <Animated.View
             style={[
@@ -139,16 +242,13 @@ export default function PreLoginMarqueeFooter({
               { transform: [{ translateX: scrollAnim }] },
             ]}
           >
-            <Text
-              style={styles.marqueeText}
-              numberOfLines={1}
-              onLayout={handleTextLayout}
-            >
-              {marqueeMessage}
-            </Text>
+            {/* 3 repeating sets of features to ensure a 100% gapless continuous marquee loop */}
+            {renderFeaturePills(0, handleSetLayout)}
+            {renderFeaturePills(1)}
+            {renderFeaturePills(2)}
           </Animated.View>
         </View>
-      </TouchableOpacity>
+      </View>
 
       {/* 2. Highlighted Direct Action Icons Bar */}
       <View style={styles.actionsBar}>
@@ -241,7 +341,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: '#1E293B',
-    paddingVertical: 6,
+    paddingVertical: 7,
     paddingHorizontal: 8,
     borderBottomWidth: 1,
     borderBottomColor: '#334155',
@@ -251,8 +351,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: '#0284C7',
-    paddingHorizontal: 7,
-    paddingVertical: 3,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
     borderRadius: 6,
     marginRight: 8,
     flexShrink: 0,
@@ -267,19 +367,65 @@ const styles = StyleSheet.create({
   tickerViewport: {
     flex: 1,
     overflow: 'hidden',
-    height: 20,
+    height: 28,
     justifyContent: 'center',
   },
   tickerTrack: {
     flexDirection: 'row',
     alignItems: 'center',
-    whiteSpace: 'nowrap',
+    alignSelf: 'flex-start',
+    flexWrap: 'nowrap',
+    ...(Platform.OS === 'web' ? { whiteSpace: 'nowrap' } : {}),
   },
-  marqueeText: {
-    color: '#F8FAFC',
-    fontSize: 12.5,
-    fontWeight: '600',
-    letterSpacing: 0.3,
+  setRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexShrink: 0,
+    flexWrap: 'nowrap',
+    ...(Platform.OS === 'web' ? { whiteSpace: 'nowrap' } : {}),
+  },
+  tickerPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(30, 41, 59, 0.7)',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 14,
+    marginRight: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(71, 85, 105, 0.6)',
+    flexShrink: 0,
+  },
+  pillIconBox: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 5,
+  },
+  pillEmoji: {
+    fontSize: 12,
+    marginRight: 4,
+  },
+  pillTitle: {
+    fontSize: 12,
+    fontWeight: '700',
+    letterSpacing: 0.2,
+    marginRight: 5,
+  },
+  pillDesc: {
+    fontSize: 11,
+    color: '#94A3B8',
+    fontWeight: '500',
+  },
+  pillDot: {
+    width: 4,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: '#38BDF8',
+    marginLeft: 8,
   },
   actionsBar: {
     backgroundColor: '#0F172A',

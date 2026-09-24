@@ -57,37 +57,51 @@ export default function BusinessDigitalizeCard({ style = null }) {
       <View style={styles.contentBox}>
         <Text style={styles.title}>Digitalize Your Business Setup & Request a Demo</Text>
         <Text style={styles.subtitle}>
-          Transform your local shop into an online powerhouse! Get an instant digital store, QR codes, live GPS delivery tracking, automated inventory, and thermal billing.
+          Transform your local shop into an online powerhouse! Instant products & barcode catalog, real-time orders with sound alerts, live GPS delivery tracking, thermal POS billing, and automated inventory.
         </Text>
 
         {/* Feature Highlights Grid */}
         <View style={styles.featuresGrid}>
           <View style={styles.featureItem}>
             <View style={[styles.featureIconBox, { backgroundColor: '#EFF6FF' }]}>
-              <Icon name="shopping-bag" size={14} color="#007AFF" />
+              <Icon name="cube" size={14} color="#007AFF" />
             </View>
-            <Text style={styles.featureText}>Instant Digital Storefront</Text>
+            <Text style={styles.featureText}>Products & Barcode Catalog</Text>
           </View>
 
           <View style={styles.featureItem}>
             <View style={[styles.featureIconBox, { backgroundColor: '#ECFDF5' }]}>
-              <Icon name="map-marker" size={14} color="#10B981" />
+              <Icon name="shopping-cart" size={14} color="#10B981" />
             </View>
-            <Text style={styles.featureText}>Live GPS Order Tracking</Text>
+            <Text style={styles.featureText}>Real-Time Orders & Sound Alerts</Text>
           </View>
 
           <View style={styles.featureItem}>
-            <View style={[styles.featureIconBox, { backgroundColor: '#FEF3C7' }]}>
-              <Icon name="qrcode" size={14} color="#D97706" />
+            <View style={[styles.featureIconBox, { backgroundColor: '#FDF2F8' }]}>
+              <Icon name="motorcycle" size={14} color="#DB2777" />
             </View>
-            <Text style={styles.featureText}>Store QR Menus & Billing</Text>
+            <Text style={styles.featureText}>Live GPS Delivery Tracking</Text>
           </View>
 
           <View style={styles.featureItem}>
             <View style={[styles.featureIconBox, { backgroundColor: '#F3E8FF' }]}>
               <Icon name="print" size={14} color="#9333EA" />
             </View>
-            <Text style={styles.featureText}>Thermal Receipts & Barcodes</Text>
+            <Text style={styles.featureText}>Thermal POS Billing & Invoices</Text>
+          </View>
+
+          <View style={styles.featureItem}>
+            <View style={[styles.featureIconBox, { backgroundColor: '#EEF2FF' }]}>
+              <Icon name="sliders" size={14} color="#4F46E5" />
+            </View>
+            <Text style={styles.featureText}>Automated Stock & Inventory</Text>
+          </View>
+
+          <View style={styles.featureItem}>
+            <View style={[styles.featureIconBox, { backgroundColor: '#FEF3C7' }]}>
+              <Icon name="qrcode" size={14} color="#D97706" />
+            </View>
+            <Text style={styles.featureText}>Store QR Menus & Dine-In</Text>
           </View>
         </View>
 
@@ -189,9 +203,12 @@ export default function BusinessDigitalizeCard({ style = null }) {
           <View style={styles.chipsRow}>
             {[
               'Book Free Live Demo',
-              'Digitalize My Grocery Store',
-              'Digitalize Restaurant & QR Menu',
-              'Setup Delivery Partner Tracking',
+              'Products & Barcode Setup',
+              'Real-Time Orders & Alerts',
+              'Live GPS Delivery Tracking',
+              'Thermal POS Billing Setup',
+              'Automated Stock & Inventory',
+              'Store QR Menus Setup',
             ].map((chip, idx) => (
               <TouchableOpacity
                 key={`chip-${idx}`}

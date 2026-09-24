@@ -24,6 +24,7 @@ import {
   deleteSellerEmployee,
 } from '../services/employeeService';
 import { supabase } from '../services/supabase';
+import StoreNavigationFooter from '../components/StoreNavigationFooter';
 
 const ROLE_PRESETS = [
   {
@@ -472,7 +473,12 @@ export default function SellerEmployeesScreen({ navigation, route }) {
               </TouchableOpacity>
             </View>
 
-            <ScrollView style={styles.modalBody} showsVerticalScrollIndicator={false}>
+            <ScrollView
+              style={styles.modalBody}
+              contentContainerStyle={styles.modalBodyContent}
+              showsVerticalScrollIndicator={true}
+              keyboardShouldPersistTaps="handled"
+            >
               {/* Name */}
               <Text style={styles.inputLabel}>Full Name *</Text>
               <TextInput
@@ -635,6 +641,13 @@ export default function SellerEmployeesScreen({ navigation, route }) {
           </View>
         </View>
       </Modal>
+
+      {/* Persistent Bottom Navigation Footer */}
+      <StoreNavigationFooter
+        activeTab="profile"
+        navigation={navigation}
+        forceShow={true}
+      />
     </SafeAreaView>
   );
 }
@@ -642,6 +655,9 @@ export default function SellerEmployeesScreen({ navigation, route }) {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+    height: Platform.OS === 'web' ? '100vh' : '100%',
+    maxHeight: Platform.OS === 'web' ? '100vh' : undefined,
+    overflow: 'hidden',
   },
   header: {
     flexDirection: 'row',
@@ -678,7 +694,7 @@ const styles = StyleSheet.create({
   },
   listContent: {
     padding: 16,
-    paddingBottom: 40,
+    paddingBottom: 160,
   },
   centerLoading: {
     flex: 1,
@@ -841,30 +857,34 @@ const styles = StyleSheet.create({
   },
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
+    backgroundColor: 'rgba(0,0,0,0.6)',
     justifyContent: 'center',
     alignItems: 'center',
     padding: 16,
+    ...(Platform.OS === 'web' ? { maxHeight: '100vh', overflow: 'hidden' } : {}),
   },
   modalContent: {
     width: '100%',
-    maxWidth: 520,
-    maxHeight: '90%',
+    maxWidth: 540,
+    maxHeight: '92%',
     borderRadius: 16,
     padding: 20,
     shadowColor: '#000',
-    shadowOpacity: 0.15,
+    shadowOpacity: 0.2,
     shadowRadius: 16,
     elevation: 8,
+    display: 'flex',
+    flexDirection: 'column',
   },
   modalHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'flex-start',
-    marginBottom: 16,
+    marginBottom: 14,
     paddingBottom: 12,
     borderBottomWidth: 1,
     borderBottomColor: '#E2E8F0',
+    flexShrink: 0,
   },
   modalTitle: {
     fontSize: 18,
@@ -879,7 +899,13 @@ const styles = StyleSheet.create({
     padding: 6,
   },
   modalBody: {
-    maxHeight: 460,
+    flex: 1,
+    flexShrink: 1,
+    ...(Platform.OS === 'web' ? { overflowY: 'auto' } : {}),
+  },
+  modalBodyContent: {
+    flexGrow: 1,
+    paddingBottom: 20,
   },
   inputLabel: {
     fontSize: 12,
@@ -949,6 +975,7 @@ const styles = StyleSheet.create({
     paddingTop: 12,
     borderTopWidth: 1,
     borderTopColor: '#E2E8F0',
+    flexShrink: 0,
   },
   cancelBtn: {
     paddingHorizontal: 16,
