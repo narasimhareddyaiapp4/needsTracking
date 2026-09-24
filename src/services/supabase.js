@@ -347,7 +347,8 @@ export async function getProductsWithDetails(userId) {
         name,
         variant_options (id, value)
       ),
-      product_variant_combinations (id, combination_string, price, quantity, sku)
+      product_variant_combinations (id, combination_string, price, quantity, sku),
+      product_barcodes (id, barcode, serial_number, packaging_unit, multiplier, product_variant_combination_id)
     `)
     .eq('user_id', userId)
     .order('display_order');
@@ -373,7 +374,8 @@ export async function getActiveProductsWithDetails(userId) {
           name,
           variant_options (id, value)
         ),
-        product_variant_combinations (id, combination_string, price, quantity, sku)
+        product_variant_combinations (id, combination_string, price, quantity, sku),
+        product_barcodes (id, barcode, serial_number, packaging_unit, multiplier, product_variant_combination_id)
       `)
       .eq('is_active', true);
 
@@ -426,7 +428,8 @@ export async function getTopProductsWithDetails() {
         name,
         variant_options (id, value)
       ),
-      product_variant_combinations (id, combination_string, price, quantity, sku)
+      product_variant_combinations (id, combination_string, price, quantity, sku),
+      product_barcodes (id, barcode, serial_number, packaging_unit, multiplier, product_variant_combination_id)
     `)
     .eq('is_active', true)
     .or(`visible_from.is.null,visible_from.lte.${currentTime}`)

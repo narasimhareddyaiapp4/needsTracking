@@ -45,6 +45,7 @@
     "expo-status-bar": "~2.2.3",
     "expo-task-manager": "~13.1.4",
     "expo-web-browser": "~14.2.0",
+    "html5-qrcode": "^2.3.8",
     "jpeg-js": "^0.4.4",
     "jsqr": "^1.4.0",
     "qrcode": "^1.5.4",

@@ -49,6 +49,9 @@ import StoreQrModal from '../components/StoreQrModal';
 import SellerContactShareModal from '../components/SellerContactShareModal';
 import { batchFetchSellerContacts } from '../services/sellerContactService';
 import { getActiveEmployeeSession } from '../services/employeeService';
+import { barcodeService } from '../services/barcodeService';
+import { playNotificationChime } from '../services/speechService';
+import BarcodeScannerModal from '../components/BarcodeScannerModal';
 
 const { width } = Dimensions.get('window');
 const SUBCAT_VIEW_MODE_KEY = '@catalog_subcat_view_mode';
@@ -243,6 +246,7 @@ const CatalogScreen = ({ navigation, route }) => {
   const [selectedProduct, setSelectedProduct] = useState(null);
   const [shareModalVisible, setShareModalVisible] = useState(false);
   const [shareProduct, setShareProduct] = useState(null);
+  const [barcodeModalVisible, setBarcodeModalVisible] = useState(false);
 
   const openShareModal = useCallback((prod) => {
     setShareProduct(prod);
@@ -612,7 +616,12 @@ const CatalogScreen = ({ navigation, route }) => {
                })
         );
 
-        return nameMatch || descMatch || typeMatch || subMatch || unitMatch || catLabelMatch || variantMatch || variantOptionMatch;
+        const barcodeMatch = (product?.product_barcodes || []).some(
+          b => (b?.barcode || '').toLowerCase().includes(query) ||
+               (b?.serial_number || '').toLowerCase().includes(query)
+        );
+
+        return nameMatch || descMatch || typeMatch || subMatch || unitMatch || catLabelMatch || variantMatch || variantOptionMatch || barcodeMatch;
       });
     }
 
@@ -915,6 +924,88 @@ const CatalogScreen = ({ navigation, route }) => {
         } finally {
             setUpdatingCart(false);
         }
+    }
+  };
+
+  const handleBarcodeSubmit = async (inputCode) => {
+    const code = (inputCode || searchQuery || '').trim();
+    if (!code) {
+      setBarcodeModalVisible(true);
+      return;
+    }
+
+    let matchedProduct = null;
+    let matchedBarcode = null;
+    let matchedCombinationId = null;
+
+    const productList = products && products.length > 0 ? products : currentCategoryProducts;
+    for (const prod of (productList || [])) {
+      const foundBc = (prod.product_barcodes || []).find(
+        (b) => (b.barcode || '').trim().toLowerCase() === code.toLowerCase() ||
+               (b.serial_number || '').trim().toLowerCase() === code.toLowerCase()
+      );
+      if (foundBc) {
+        matchedProduct = prod;
+        matchedBarcode = foundBc;
+        matchedCombinationId = foundBc.product_variant_combination_id;
+        break;
+      }
+    }
+
+    if (!matchedProduct) {
+      try {
+        const scanRes = await barcodeService.scanBarcode(code);
+        if (scanRes.success && scanRes.item) {
+          const item = scanRes.item;
+          matchedProduct = (productList || []).find((p) => p.id === item.productId);
+          if (!matchedProduct) {
+            matchedProduct = {
+              id: item.productId,
+              product_name: item.productName,
+              amount: item.unitPrice,
+              user_id: item.sellerId,
+              product_variant_combinations: [
+                {
+                  id: item.variantId,
+                  combination_string: item.combinationString || 'Default',
+                  price: item.unitPrice,
+                  quantity: item.currentStock,
+                  sku: item.sku,
+                },
+              ],
+            };
+          }
+          matchedBarcode = {
+            barcode: item.barcode,
+            multiplier: item.multiplier || 1,
+          };
+          matchedCombinationId = item.variantId;
+        }
+      } catch (err) {
+        console.warn('Barcode submit scan lookup error:', err);
+      }
+    }
+
+    if (matchedProduct) {
+      try {
+        playNotificationChime();
+      } catch (_) {}
+      const combos = getProductCombinations(matchedProduct);
+      const targetCombo = combos.find((c) => c.id === matchedCombinationId) || combos[0];
+      const qtyToAdd = matchedBarcode?.multiplier || 1;
+      await handleUpdateCart(matchedProduct, targetCombo?.id, qtyToAdd);
+      if (!barcodeModalVisible) {
+        showAlert(
+          'Item Scanned! 🛒',
+          `Added "${matchedProduct.product_name}" (${targetCombo?.combination_string || 'Default'}) × ${qtyToAdd} to cart.`
+        );
+      }
+      setSearchQuery('');
+    } else {
+      showAlert(
+        'Barcode Not Found',
+        `No product found matching barcode or serial number "${code}". Please ensure this barcode is registered in Inventory.`
+      );
     }
   };
 
@@ -2584,18 +2675,34 @@ const CatalogScreen = ({ navigation, route }) => {
             <Icon name="search" size={16} color="#007AFF" style={styles.searchIcon} />
             <TextInput
               style={styles.bottomSearchInput}
-              placeholder="Search products, variants..."
+              placeholder="Search products, variants, barcode..."
               placeholderTextColor="#999"
               value={searchQuery}
               onChangeText={setSearchQuery}
+              onSubmitEditing={() => handleBarcodeSubmit(searchQuery)}
               returnKeyType="search"
               clearButtonMode="while-editing"
+              autoCapitalize="none"
             />
             {searchQuery.length > 0 && (
               <TouchableOpacity onPress={() => setSearchQuery('')} style={styles.clearIconBtn}>
                 <Icon name="times-circle" size={18} color="#999" />
               </TouchableOpacity>
             )}
+            <TouchableOpacity
+              onPress={() => {
+                if (searchQuery.trim()) {
+                  handleBarcodeSubmit(searchQuery);
+                } else {
+                  setBarcodeModalVisible(true);
+                }
+              }}
+              style={styles.barcodeScanBtn}
+              activeOpacity={0.7}
+              accessibilityLabel="Scan Barcode"
+            >
+              <Icon name="barcode" size={18} color="#007AFF" />
+            </TouchableOpacity>
           </View>
         </View>
 
@@ -2655,6 +2762,16 @@ const CatalogScreen = ({ navigation, route }) => {
             onClose={() => setStoreQrVisible(false)}
           />
         )}
+
+        {/* Mobile Barcode & QR Scanner Modal */}
+        <BarcodeScannerModal
+          visible={barcodeModalVisible}
+          onClose={() => setBarcodeModalVisible(false)}
+          onScan={(code) => handleBarcodeSubmit(code)}
+          title="POS Barcode Scanner"
+          subtitle="Scan product barcode, packaging, or QR to add to cart"
+          defaultContinuous={true}
+        />
       </KeyboardAvoidingView>
 
     </View>
@@ -3001,6 +3118,14 @@ const styles = StyleSheet.create({
   clearIconBtn: {
     padding: 4,
     marginLeft: 4,
+  },
+  barcodeScanBtn: {
+    padding: 6,
+    marginLeft: 6,
+    borderRadius: 8,
+    backgroundColor: '#EFF6FF',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   emptySearchContainer: {
     padding: 40,

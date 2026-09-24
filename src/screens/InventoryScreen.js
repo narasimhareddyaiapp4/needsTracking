@@ -15,6 +15,8 @@ import {
 import debounce from 'lodash.debounce';
 import InventoryHistory from '../components/InventoryHistory';
 import { barcodeService } from '../services/barcodeService';
+import { FontAwesome as Icon } from '@expo/vector-icons';
+import BarcodeScannerModal from '../components/BarcodeScannerModal';
 
 const InventoryScreen = ({ route }) => {
   const { session, userId } = route.params || {};
@@ -30,6 +32,7 @@ const InventoryScreen = ({ route }) => {
   const [scannedBarcode, setScannedBarcode] = useState('');
   const [scanning, setScanning] = useState(false);
   const [scanResult, setScanResult] = useState(null);
+  const [scannerModalMode, setScannerModalMode] = useState(null); // 'lookup' | 'mapping' | null
 
   // Barcode Management State for Selected Item
   const [itemBarcodes, setItemBarcodes] = useState([]);
@@ -364,8 +367,16 @@ const InventoryScreen = ({ route }) => {
           {scanning ? (
             <ActivityIndicator size="small" color="#fff" />
           ) : (
-            <Text style={styles.scanButtonText}>🔍 Scan</Text>
+            <Text style={styles.scanButtonText}>🔍 Lookup</Text>
           )}
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={styles.cameraScanButton}
+          onPress={() => setScannerModalMode('lookup')}
+          accessibilityLabel="Open Mobile Camera Scanner"
+        >
+          <Icon name="camera" size={14} color="#fff" style={{ marginRight: 4 }} />
+          <Text style={styles.cameraScanButtonText}>Camera</Text>
         </TouchableOpacity>
       </View>
 
@@ -569,13 +580,23 @@ const InventoryScreen = ({ route }) => {
                   <View style={styles.addBarcodeSection}>
                     <Text style={styles.sectionHeader}>+ Map New Barcode</Text>
                     
-                    <TextInput
-                      style={styles.input}
-                      placeholder="Barcode (EAN-13, UPC, Code-128)*"
-                      value={newBarcode}
-                      onChangeText={setNewBarcode}
-                      autoCapitalize="none"
-                    />
+                    <View style={styles.barcodeInputWithScanRow}>
+                      <TextInput
+                        style={[styles.input, { flex: 1, marginBottom: 0 }]}
+                        placeholder="Barcode (EAN-13, UPC, Code-128)*"
+                        value={newBarcode}
+                        onChangeText={setNewBarcode}
+                        autoCapitalize="none"
+                      />
+                      <TouchableOpacity
+                        style={styles.fieldScanButton}
+                        onPress={() => setScannerModalMode('mapping')}
+                        accessibilityLabel="Scan Barcode to Map"
+                      >
+                        <Icon name="camera" size={13} color="#007AFF" style={{ marginRight: 4 }} />
+                        <Text style={styles.fieldScanButtonText}>Scan</Text>
+                      </TouchableOpacity>
+                    </View>
 
                     <View style={styles.rowInputs}>
                       <View style={{ flex: 1, marginRight: 5 }}>
@@ -648,6 +669,33 @@ const InventoryScreen = ({ route }) => {
           )}
         </View>
       </View>
+
+      {/* Mobile Barcode Scanner Modal */}
+      <BarcodeScannerModal
+        visible={Boolean(scannerModalMode)}
+        onClose={() => setScannerModalMode(null)}
+        onScan={(code) => {
+          if (scannerModalMode === 'mapping') {
+            setNewBarcode(code);
+            setScannerModalMode(null);
+          } else {
+            setScannedBarcode(code);
+            setScannerModalMode(null);
+            handleBarcodeScan(code);
+          }
+        }}
+        title={
+          scannerModalMode === 'mapping'
+            ? 'Scan Barcode to Map'
+            : 'Inventory Mobile Scanner'
+        }
+        subtitle={
+          scannerModalMode === 'mapping'
+            ? 'Scan product packaging or barcode label to assign'
+            : 'Scan barcode to check stock, audit, or adjust inventory'
+        }
+        defaultContinuous={false}
+      />
     </View>
   );
 };
@@ -695,6 +743,41 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontWeight: 'bold',
     fontSize: 14,
+  },
+  cameraScanButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#059669',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 6,
+    marginLeft: 8,
+  },
+  cameraScanButtonText: {
+    color: '#fff',
+    fontWeight: 'bold',
+    fontSize: 13,
+  },
+  barcodeInputWithScanRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 12,
+  },
+  fieldScanButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#EFF6FF',
+    borderWidth: 1,
+    borderColor: '#BFDBFE',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 6,
+  },
+  fieldScanButtonText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#007AFF',
   },
   scanResultCard: {
     backgroundColor: '#eef2ff',
