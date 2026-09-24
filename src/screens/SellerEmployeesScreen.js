@@ -16,6 +16,7 @@ import {
 } from 'react-native';
 import Icon from 'react-native-vector-icons/FontAwesome';
 import { useTheme } from '../context/ThemeContext';
+import { showAlert } from '../utils/alertUtils';
 import {
   getSellerEmployees,
   addSellerEmployee,
@@ -207,11 +208,27 @@ export default function SellerEmployeesScreen({ navigation, route }) {
 
   const handleSaveEmployee = async () => {
     if (!formName.trim()) {
-      Alert.alert('Required', 'Please enter employee name');
+      showAlert('Required', 'Please enter employee name');
       return;
     }
     if (!formEmail.trim() && !formMobile.trim()) {
-      Alert.alert('Contact Required', 'Please enter either an email or mobile number for staff login');
+      showAlert('Contact Required', 'Please enter either an email or mobile number for staff login');
+      return;
+    }
+
+    let activeSellerId = sellerId;
+    if (!activeSellerId) {
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user) {
+          activeSellerId = user.id;
+          setSellerId(user.id);
+        }
+      } catch (_) {}
+    }
+
+    if (!activeSellerId) {
+      showAlert('Error', 'Unable to resolve seller store account ID. Please re-open your profile.');
       return;
     }
 
@@ -226,9 +243,9 @@ export default function SellerEmployeesScreen({ navigation, route }) {
           pin_code: formPin,
           permissions: formPermissions,
         });
-        Alert.alert('Success', 'Staff member updated successfully');
+        showAlert('Success', 'Staff member updated successfully');
       } else {
-        await addSellerEmployee(sellerId, {
+        await addSellerEmployee(activeSellerId, {
           name: formName,
           email: formEmail,
           mobile: formMobile,
@@ -236,12 +253,12 @@ export default function SellerEmployeesScreen({ navigation, route }) {
           pin_code: formPin,
           permissions: formPermissions,
         });
-        Alert.alert('Success', 'New staff member added successfully! They can now log in.');
+        showAlert('Success', 'New staff member added successfully! They can now log in.');
       }
       setModalVisible(false);
       fetchEmployees();
     } catch (err) {
-      Alert.alert('Error', err.message || 'Failed to save staff member');
+      showAlert('Error', err.message || 'Failed to save staff member');
     } finally {
       setSaving(false);
     }
@@ -255,12 +272,12 @@ export default function SellerEmployeesScreen({ navigation, route }) {
         prev.map((e) => (e.id === emp.id ? { ...e, is_active: updated } : e))
       );
     } catch (err) {
-      Alert.alert('Error', 'Failed to update employee status');
+      showAlert('Error', 'Failed to update employee status');
     }
   };
 
   const handleDelete = (emp) => {
-    Alert.alert(
+    showAlert(
       'Remove Staff Member',
       `Are you sure you want to remove "${emp.name}" from your store staff?`,
       [
@@ -272,8 +289,9 @@ export default function SellerEmployeesScreen({ navigation, route }) {
             try {
               await deleteSellerEmployee(emp.id);
               setEmployees((prev) => prev.filter((e) => e.id !== emp.id));
+              showAlert('Success', 'Staff member removed');
             } catch (err) {
-              Alert.alert('Error', 'Failed to delete staff member');
+              showAlert('Error', 'Failed to delete staff member: ' + (err.message || ''));
             }
           },
         },

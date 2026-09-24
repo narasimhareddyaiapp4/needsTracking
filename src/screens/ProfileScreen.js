@@ -2009,9 +2009,12 @@ const ProfileScreen = ({ navigation, route }) => {
             style={styles.salesReportProfileBtn}
             activeOpacity={0.8}
             onPress={() => {
-              navigation.navigate('SellerSalesReport', {
-                sellerId: user?.id,
-                sellerName: profile?.business_name || profile?.full_name,
+              const sid = currentUser?.id || profile?.id;
+              const sname = profile?.business_name || profile?.full_name || '';
+              const nav = navigation?.getParent?.() || navigation;
+              nav.navigate('SellerSalesReport', {
+                sellerId: sid,
+                sellerName: sname,
               });
             }}
           >
@@ -2034,9 +2037,12 @@ const ProfileScreen = ({ navigation, route }) => {
             style={[styles.salesReportProfileBtn, { marginTop: 10, borderColor: '#BAE6FD', backgroundColor: '#F0F9FF' }]}
             activeOpacity={0.8}
             onPress={() => {
-              navigation.navigate('SellerEmployees', {
-                sellerId: user?.id,
-                sellerName: profile?.business_name || profile?.full_name,
+              const sid = currentUser?.id || profile?.id;
+              const sname = profile?.business_name || profile?.full_name || '';
+              const nav = navigation?.getParent?.() || navigation;
+              nav.navigate('SellerEmployees', {
+                sellerId: sid,
+                sellerName: sname,
               });
             }}
           >

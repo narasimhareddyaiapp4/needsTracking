@@ -43,12 +43,18 @@ DROP POLICY IF EXISTS "Sellers can manage their own employees" ON public.seller_
 DROP POLICY IF EXISTS "Employees can view own record" ON public.seller_employees;
 DROP POLICY IF EXISTS "Allow staff login resolution" ON public.seller_employees;
 
--- Store owner has full access (select, insert, update, delete) to their own employees
+-- Store owner and admin have full access (select, insert, update, delete) to their own employees
 CREATE POLICY "Sellers can manage their own employees"
 ON public.seller_employees
 FOR ALL
-USING (auth.uid() = seller_id)
-WITH CHECK (auth.uid() = seller_id);
+USING (
+    auth.uid() = seller_id 
+    OR EXISTS (SELECT 1 FROM public.profiles WHERE id = auth.uid() AND role IN ('admin', 'superadmin'))
+)
+WITH CHECK (
+    auth.uid() = seller_id 
+    OR EXISTS (SELECT 1 FROM public.profiles WHERE id = auth.uid() AND role IN ('admin', 'superadmin'))
+);
 
 -- Employee can view their own record
 CREATE POLICY "Employees can view own record"
@@ -56,7 +62,7 @@ ON public.seller_employees
 FOR SELECT
 USING (auth.uid() = user_id);
 
--- Allow authenticated users to look up their employee association by email or user_id
+-- Allow staff login resolution & counter verification
 CREATE POLICY "Allow staff login resolution"
 ON public.seller_employees
 FOR SELECT
@@ -109,7 +115,7 @@ WITH CHECK (
     )
 );
 
--- Helper function to verify employee quick PIN or lookup
+-- 5. Helper function to verify employee quick PIN or lookup
 CREATE OR REPLACE FUNCTION public.verify_employee_pin(
     p_seller_id UUID,
     p_pin TEXT
@@ -133,3 +139,10 @@ BEGIN
     LIMIT 1;
 END;
 $$;
+
+-- 6. Grant client access permissions to anon, authenticated, and service_role
+GRANT ALL ON TABLE public.seller_employees TO anon, authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.verify_employee_pin(UUID, TEXT) TO anon, authenticated, service_role;
+
+-- 7. Force PostgREST to reload its schema cache immediately
+NOTIFY pgrst, 'reload schema';
