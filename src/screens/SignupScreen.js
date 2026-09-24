@@ -14,6 +14,7 @@ import { supabase, getAuthRedirectUrl } from '../services/supabase';
 import { StackActions } from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import Constants from 'expo-constants';
+import PreLoginMarqueeFooter from '../components/PreLoginMarqueeFooter';
 
 export default function SignupScreen({ navigation, route }) {
   const [email, setEmail] = useState('');
@@ -205,6 +206,7 @@ export default function SignupScreen({ navigation, route }) {
           </View>
         </View>
       </ScrollView>
+      <PreLoginMarqueeFooter navigation={navigation} />
     </KeyboardAvoidingView>
   );
 }

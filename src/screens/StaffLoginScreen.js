@@ -16,6 +16,7 @@ import { resolveEmployeeSession } from '../services/employeeService';
 import { StackActions } from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/FontAwesome';
 import { useTheme } from '../context/ThemeContext';
+import PreLoginMarqueeFooter from '../components/PreLoginMarqueeFooter';
 
 export default function StaffLoginScreen({ navigation, route }) {
   const { colors } = useTheme();
@@ -239,6 +240,7 @@ export default function StaffLoginScreen({ navigation, route }) {
           </TouchableOpacity>
         </View>
       </ScrollView>
+      <PreLoginMarqueeFooter navigation={navigation} />
     </SafeAreaView>
   );
 }

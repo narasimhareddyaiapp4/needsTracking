@@ -14,6 +14,7 @@ import {
 import Icon from 'react-native-vector-icons/FontAwesome';
 import { supabase, getAuthRedirectUrl } from '../services/supabase';
 import { StackActions } from '@react-navigation/native';
+import PreLoginMarqueeFooter from '../components/PreLoginMarqueeFooter';
 
 export default function AuthScreen({ navigation, route }) {
   const [isSignUp, setIsSignUp] = useState(false);
@@ -290,6 +291,7 @@ export default function AuthScreen({ navigation, route }) {
           </TouchableOpacity>
         </View>
       </ScrollView>
+      <PreLoginMarqueeFooter navigation={navigation} />
     </KeyboardAvoidingView>
   );
 }

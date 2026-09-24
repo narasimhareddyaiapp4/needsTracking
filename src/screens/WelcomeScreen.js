@@ -26,6 +26,7 @@ import StoreNavigationFooter from '../components/StoreNavigationFooter';
 import FullScreenImageViewer from '../components/FullScreenImageViewer';
 import StoreQrModal from '../components/StoreQrModal';
 import WelcomeQrModal from '../components/WelcomeQrModal';
+import BusinessDigitalizeCard from '../components/BusinessDigitalizeCard';
 import { getPreferredStore, setPreferredStore, clearPreferredStore } from '../services/localStorageService';
 
 const { width } = Dimensions.get('window');
@@ -694,6 +695,9 @@ export default function WelcomeScreen() {
               </TouchableOpacity>
             </View>
           )}
+
+          {/* Industry & Business Digitalize Setup / Live Demo Contact Section */}
+          <BusinessDigitalizeCard />
 
           {/* Portal Separator */}
           <Text style={styles.sectionHeader}>Portals & Access</Text>

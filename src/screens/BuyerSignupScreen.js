@@ -16,6 +16,7 @@ import { getGuestCart, clearGuestCart, getPreferredStore } from '../services/loc
 import Icon from 'react-native-vector-icons/Ionicons';
 import FontAwesome from 'react-native-vector-icons/FontAwesome';
 import Constants from 'expo-constants';
+import PreLoginMarqueeFooter from '../components/PreLoginMarqueeFooter';
 
 import { showAlert } from '../utils/alertUtils';
 
@@ -311,10 +312,7 @@ export default function BuyerSignupScreen({ navigation, route }) {
           </View>
         </View>
       </ScrollView>
-
-      <View style={styles.footer}>
-        <Text style={styles.footerText}>© 2025 {Constants?.expoConfig?.extra?.ORG_NAME || process.env.EXPO_PUBLIC_ORG_NAME || 'NeedsTracking'}. Version 1.0</Text>
-      </View>
+      <PreLoginMarqueeFooter navigation={navigation} />
     </KeyboardAvoidingView>
   );
 }

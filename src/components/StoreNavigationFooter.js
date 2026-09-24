@@ -2,6 +2,7 @@ import React, { useMemo } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Platform } from 'react-native';
 import { useCart } from '../context/CartContext';
 import { getGuestCart, getPreferredStore } from '../services/localStorageService';
+import PreLoginMarqueeFooter from './PreLoginMarqueeFooter';
 
 const StoreNavigationFooter = ({
   activeTab = 'store',
@@ -18,6 +19,7 @@ const StoreNavigationFooter = ({
   forceShow = false,
   isDirectQr: propIsDirectQr,
   hideStoresTab: propHideStoresTab,
+  showPreLoginMarquee = true,
 }) => {
   const { cart, cartItemCount: contextCartItemCount, user } = useCart();
   const [guestCount, setGuestCount] = React.useState(0);
@@ -144,8 +146,16 @@ const StoreNavigationFooter = ({
     }
   };
 
+  const shouldShowMarquee = Boolean(
+    showPreLoginMarquee && (!user || showPreLoginMarquee === 'always')
+  );
+
   return (
-    <View style={styles.footerContainer}>
+    <View style={styles.outerWrapper}>
+      {shouldShowMarquee && (
+        <PreLoginMarqueeFooter navigation={navigation} />
+      )}
+      <View style={styles.footerContainer}>
       {/* Stores Tab (Hidden when accessed directly via QR code) */}
       {!isDirectQr && (
         <TouchableOpacity
@@ -220,10 +230,16 @@ const StoreNavigationFooter = ({
         </Text>
       </TouchableOpacity>
     </View>
+    </View>
   );
 };
 
 const styles = StyleSheet.create({
+  outerWrapper: {
+    width: '100%',
+    zIndex: 999,
+    flexShrink: 0,
+  },
   footerContainer: {
     flexDirection: 'row',
     alignItems: 'center',

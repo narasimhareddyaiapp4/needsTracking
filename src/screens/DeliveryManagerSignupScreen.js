@@ -14,6 +14,7 @@ import { supabase, signInWithGoogle, getAuthRedirectUrl } from '../services/supa
 import Icon from 'react-native-vector-icons/Ionicons';
 import FontAwesome from 'react-native-vector-icons/FontAwesome';
 import { ActivityIndicator } from 'react-native';
+import PreLoginMarqueeFooter from '../components/PreLoginMarqueeFooter';
 
 export default function DeliveryManagerSignupScreen({ navigation }) {
   const [email, setEmail] = useState('');
@@ -229,6 +230,7 @@ export default function DeliveryManagerSignupScreen({ navigation }) {
           </View>
         </View>
       </ScrollView>
+      <PreLoginMarqueeFooter navigation={navigation} />
     </KeyboardAvoidingView>
   );
 }

@@ -17,6 +17,7 @@ import Icon from 'react-native-vector-icons/Ionicons';
 import FontAwesome from 'react-native-vector-icons/FontAwesome';
 import Constants from 'expo-constants';
 import { ActivityIndicator } from 'react-native';
+import PreLoginMarqueeFooter from '../components/PreLoginMarqueeFooter';
 
 export default function SellerLoginScreen({ navigation, route }) {
   const [email, setEmail] = useState('');
@@ -339,9 +340,7 @@ export default function SellerLoginScreen({ navigation, route }) {
 
         </View>
       </ScrollView>
-      <View style={styles.footer}>
-        <Text style={styles.footerText}>© 2025 {Constants?.expoConfig?.extra?.ORG_NAME || process.env.EXPO_PUBLIC_ORG_NAME || 'NeedsTracking'}. Version 1.0</Text>
-      </View>
+      <PreLoginMarqueeFooter navigation={navigation} />
     </KeyboardAvoidingView>
   );
 }
