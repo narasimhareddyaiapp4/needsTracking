@@ -1328,7 +1328,7 @@ const CheckoutScreen = ({ navigation, route }) => {
         const sellerGroup = itemsBySeller[sellerKey];
         const rawSellerId = sellerGroup.sellerId && sellerGroup.sellerId !== 'store'
           ? sellerGroup.sellerId
-          : (profile?.role === 'seller' ? profile?.id : null);
+          : (resolvedSellerId || (profile?.role === 'seller' ? profile?.id : null));
         const isValidUUID = (val) =>
           typeof val === 'string' &&
           /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val.trim());

@@ -546,13 +546,15 @@ export function buildUpiPaymentUri({ upiId, payeeName = '', amount, note, rawTex
         params.delete('pn');
       }
 
-      // Add clean Transaction Reference (tr) if provided and not present
-      if (tr && !params.has('tr')) {
+      // Only retain or add tr if this is a registered merchant QR that originally had mc (merchant category code)
+      // NPCI strictly declines P2P / standard store payments if tr is injected!
+      if (tr && params.has('mc') && !params.has('tr')) {
         const cleanTr = String(tr).replace(/[^a-zA-Z0-9]/g, '').slice(0, 30);
         if (cleanTr) params.set('tr', cleanTr);
       }
 
-      return `${base}?${params.toString()}`;
+      // Convert URLSearchParams output from '+' to '%20' so NPCI does not reject illegal '+' symbols in tn
+      return `${base}?${params.toString().replace(/\+/g, '%20')}`;
     } catch (e) {
       console.warn('Error preserving scanned UPI parameters in buildUpiPaymentUri:', e);
     }
@@ -583,10 +585,10 @@ export function buildUpiPaymentUri({ upiId, payeeName = '', amount, note, rawTex
     uri += `&am=${Number(amount).toFixed(2)}`;
   }
 
-  if (tr) {
-    const cleanTr = String(tr).replace(/[^a-zA-Z0-9]/g, '').slice(0, 30);
-    if (cleanTr) uri += `&tr=${encodeURIComponent(cleanTr)}`;
-  }
+  // NOTE: In NPCI UPI spec, 'tr' (Transaction Reference) is ONLY permitted for corporate merchant gateways with 'mc'.
+  // Adding 'tr' to a personal/P2P UPI ID causes Google Pay, PhonePe & Paytm to reject the transaction with "Payment Failed".
+  // The unique 6-digit payment code is already safely in 'tn' (Transaction Note, e.g. "Order CD81 582305"),
+  // which is universally supported across all banks without failure.
 
   return uri;
 }

@@ -175,3 +175,19 @@
   4. **Fresh Production Web Export**:
      - Generated fresh Expo web bundle (`dist/`), prepared GitHub Pages assets (`.nojekyll`, `404.html`), and verified clean build.
 
+## 2026-09-24 18:43:00 UTC
+- **User Request**: "Direct Counter Checkout works good insted of Direct Counter Checkout not wokring payment faild kindly check"
+- **Summary**:
+  1. **Investigated Counter Checkout vs Standard Checkout**:
+     - **Direct Counter Checkout** (Fast Counter POS Card in [CheckoutScreen.js](file:///workspaces/needsTracking/src/screens/CheckoutScreen.js)): Operates smoothly because the seller/cashier confirms receipt of cash or UPI directly, recording the order as `status: 'completed'` and `payment_status: 'paid'` without external gateway calls.
+     - **Standard Checkout & Dynamic UPI QR**: Diagnosed root causes of why regular checkout or scanning the dynamic bill QR code failed with "Payment Failed" in UPI apps (Google Pay, PhonePe, Paytm):
+       - NPCI declines UPI transactions containing the `&tr=` parameter when the payee is an individual/P2P UPI ID without a registered Merchant Category Code (`mc`).
+       - `URLSearchParams.prototype.toString()` encoded spaces as `+` (`Order+CD81+582305`), which NPCI rejects as an illegal special character in transaction notes.
+       - In [CheckoutScreen.js](file:///workspaces/needsTracking/src/screens/CheckoutScreen.js), `handlePlaceOrder` lacked `resolvedSellerId` fallback in `rawSellerId` (which was present in `handleFastPosOrder`).
+  2. **Codebase Fixes Applied**:
+     - In [qrScanService.js](file:///workspaces/needsTracking/src/services/qrScanService.js), updated `buildUpiPaymentUri` to never inject `&tr=` on personal/P2P UPI IDs, retaining the 6-digit payment code exclusively in the universally accepted `tn` field (`Order CD81 582305`).
+     - Enforced standard `%20` space encoding instead of `+` on scanned URI parameters.
+     - Added `resolvedSellerId` fallback to `rawSellerId` in [CheckoutScreen.js](file:///workspaces/needsTracking/src/screens/CheckoutScreen.js).
+  3. **Verified Build**:
+     - Executed full production web export (`npx expo export -p web`) with zero errors, updating `dist/` bundle assets.
+
