@@ -18,6 +18,7 @@ import FullScreenImageViewer from '../components/FullScreenImageViewer';
 import SellerContactShareModal from '../components/SellerContactShareModal';
 import { addToCart, supabase } from '../services/supabase';
 import { getFavoriteProductIds, toggleFavoriteProductId } from '../services/localStorageService';
+import { calculateProductOffer } from '../utils/offerUtils';
 
 const isImageMedia = (media) => {
   if (!media) return false;
@@ -108,7 +109,7 @@ const ProductDetailScreen = ({ navigation, route }) => {
                 name,
                 variant_options (id, value)
               ),
-              product_variant_combinations (id, combination_string, price, quantity, sku)
+              product_variant_combinations (id, combination_string, price, mrp, quantity, sku)
             `)
             .eq('id', productId)
             .single();
@@ -148,7 +149,7 @@ const ProductDetailScreen = ({ navigation, route }) => {
     if (!product) return null;
     const combos = product.product_variant_combinations || [];
     if (combos.length === 0) {
-      return { id: product.id, combination_string: 'Default', price: product.amount || 0, quantity: 100 };
+      return { id: product.id, combination_string: 'Default', price: product.amount || 0, mrp: product.mrp, quantity: 100 };
     }
     if (combos.length === 1) {
       return combos[0];
@@ -362,7 +363,35 @@ const ProductDetailScreen = ({ navigation, route }) => {
 
       <View style={styles.detailsContainer}>
         <Text style={styles.productName}>{product.product_name}</Text>
-        <Text style={styles.productPrice}>₹{product.amount}{product.unit ? ` / ${product.unit}` : ''}</Text>
+        {(() => {
+          const combo = getVariantCombination();
+          const offer = calculateProductOffer(product, combo);
+          const priceToShow = combo?.price !== undefined ? combo.price : (product.amount || 0);
+
+          return (
+            <View style={{ marginBottom: 12 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'baseline', flexWrap: 'wrap' }}>
+                <Text style={styles.productPrice}>₹{priceToShow}{product.unit ? ` / ${product.unit}` : ''}</Text>
+                {offer.hasOffer && (
+                  <>
+                    <Text style={styles.strikeMrp}>₹{offer.mrp}</Text>
+                    <View style={styles.discountBadge}>
+                      <Text style={styles.discountBadgeText}>{offer.badgeText}</Text>
+                    </View>
+                  </>
+                )}
+              </View>
+              {offer.hasOffer && offer.savings > 0 && (
+                <View style={styles.savingsBanner}>
+                  <Icon name="tag" size={12} color="#059669" style={{ marginRight: 6 }} />
+                  <Text style={styles.savingsBannerText}>
+                    Special Offer: Save ₹{offer.savings} ({offer.discountPercentage}% OFF)
+                  </Text>
+                </View>
+              )}
+            </View>
+          );
+        })()}
 
         {(product.product_type || product.subcategory) && (
           <View style={styles.badgeRow}>
@@ -505,7 +534,43 @@ const styles = StyleSheet.create({
     fontSize: 20,
     fontWeight: '700',
     color: '#007AFF',
-    marginBottom: 8,
+  },
+  strikeMrp: {
+    fontSize: 14,
+    color: '#94A3B8',
+    textDecorationLine: 'line-through',
+    marginLeft: 10,
+    fontWeight: '500',
+  },
+  discountBadge: {
+    backgroundColor: '#DCFCE7',
+    borderColor: '#86EFAC',
+    borderWidth: 1,
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    marginLeft: 8,
+  },
+  discountBadgeText: {
+    color: '#15803D',
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  savingsBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F0FDF4',
+    borderColor: '#BBF7D0',
+    borderWidth: 1,
+    borderRadius: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    marginTop: 6,
+  },
+  savingsBannerText: {
+    color: '#166534',
+    fontSize: 12,
+    fontWeight: '700',
   },
   badgeRow: {
     flexDirection: 'row',

@@ -264,10 +264,12 @@ const OrderConfirmationScreen = ({ navigation, route }) => {
             const confCgst = Number(order?.cgst_amount || confirmationBilling?.cgst_amount || 0);
             const confSgst = Number(order?.sgst_amount || confirmationBilling?.sgst_amount || 0);
             const confService = Number(order?.service_cost || confirmationBilling?.service_cost || 0);
+            const confDeliveryFee = Number(order?.delivery_fee !== undefined && order?.delivery_fee !== null ? order.delivery_fee : (confirmationBilling?.delivery_fee !== undefined ? confirmationBilling.delivery_fee : 0));
+            const isFreeDelivery = confirmationBilling?.is_free_delivery === true || (order?.delivery_fee === 0 && confSubtotal >= 200);
             const confCgstRate = order?.cgst_rate !== undefined ? order.cgst_rate : (confirmationBilling?.cgst_rate || 2.5);
             const confSgstRate = order?.sgst_rate !== undefined ? order.sgst_rate : (confirmationBilling?.sgst_rate || 2.5);
             const confServiceRate = order?.service_cost_rate !== undefined ? order.service_cost_rate : (confirmationBilling?.service_cost_rate || 0);
-            const hasConfBreakdown = confCgst > 0 || confSgst > 0 || confService > 0;
+            const hasConfBreakdown = confCgst > 0 || confSgst > 0 || confService > 0 || confDeliveryFee > 0 || isFreeDelivery;
 
             if (!hasConfBreakdown) return null;
 
@@ -295,6 +297,18 @@ const OrderConfirmationScreen = ({ navigation, route }) => {
                   <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 }}>
                     <Text style={{ fontSize: 13, color: '#64748B' }}>Service Charge ({confServiceRate}%)</Text>
                     <Text style={{ fontSize: 13, fontWeight: '600', color: '#1E293B' }}>+₹{confService.toFixed(2)}</Text>
+                  </View>
+                )}
+                {confDeliveryFee > 0 && (
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 }}>
+                    <Text style={{ fontSize: 13, color: '#64748B' }}>Delivery Fee</Text>
+                    <Text style={{ fontSize: 13, fontWeight: '600', color: '#1E293B' }}>+₹{confDeliveryFee.toFixed(2)}</Text>
+                  </View>
+                )}
+                {isFreeDelivery && confDeliveryFee === 0 && (order?.order_type === 'shop-order' || order?.order_type === 'Parcel') && (
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 }}>
+                    <Text style={{ fontSize: 13, color: '#64748B' }}>Delivery Fee</Text>
+                    <Text style={{ fontSize: 13, fontWeight: '700', color: '#059669' }}>FREE</Text>
                   </View>
                 )}
               </View>

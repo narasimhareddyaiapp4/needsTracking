@@ -20,6 +20,7 @@ import { Video } from 'expo-av';
 import FullScreenImageViewer from '../components/FullScreenImageViewer';
 import { getTopProductsWithDetails, addToCart, getCart, updateCartItem, removeCartItem, supabase } from '../services/supabase';
 import { useCart } from '../context/CartContext';
+import { calculateProductOffer } from '../utils/offerUtils';
 
 const isImageMedia = (media) => {
   if (!media) return false;
@@ -283,7 +284,22 @@ const TopProductsScreen = ({ navigation, route }) => {
           )}
           <TouchableOpacity onPress={() => openProductDetailModal(item)}>
             <Text style={styles.productName} numberOfLines={2}>{item.product_name}</Text>
-            <Text style={styles.productPrice}>₹{item.amount}</Text>
+            {(() => {
+              const offer = calculateProductOffer(item);
+              return (
+                <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', marginTop: 2 }}>
+                  <Text style={styles.productPrice}>₹{offer.sellingPrice}</Text>
+                  {offer.hasOffer && (
+                    <>
+                      <Text style={styles.cardStrikeMrp}>₹{offer.mrp}</Text>
+                      <View style={styles.cardDiscountBadge}>
+                        <Text style={styles.cardDiscountBadgeText}>{offer.badgeText}</Text>
+                      </View>
+                    </>
+                  )}
+                </View>
+              );
+            })()}
           </TouchableOpacity>
         </View>
         <TouchableOpacity 
@@ -426,12 +442,31 @@ const TopProductsScreen = ({ navigation, route }) => {
                   {/* Display price and quantity based on selected variant */}
                   {(() => {
                     const selectedCombination = getVariantCombination();
-                    const displayPrice = selectedCombination ? selectedCombination.price : selectedProduct.amount;
+                    const offer = calculateProductOffer(selectedProduct, selectedCombination);
+                    const displayPrice = selectedCombination ? selectedCombination.price : (selectedProduct.amount || 0);
                     const displayQuantity = selectedCombination ? selectedCombination.quantity : 'N/A';
 
                     return (
                       <>
-                        <Text style={styles.productPrice}>₹{displayPrice}</Text>
+                        <View style={{ flexDirection: 'row', alignItems: 'baseline', flexWrap: 'wrap', marginVertical: 4 }}>
+                          <Text style={styles.productPrice}>₹{displayPrice}</Text>
+                          {offer.hasOffer && (
+                            <>
+                              <Text style={styles.modalStrikeMrp}>₹{offer.mrp}</Text>
+                              <View style={styles.modalDiscountBadge}>
+                                <Text style={styles.modalDiscountBadgeText}>{offer.badgeText}</Text>
+                              </View>
+                            </>
+                          )}
+                        </View>
+                        {offer.hasOffer && offer.savings > 0 && (
+                          <View style={styles.modalSavingsBanner}>
+                            <Icon name="tag" size={11} color="#059669" style={{ marginRight: 5 }} />
+                            <Text style={styles.modalSavingsBannerText}>
+                              Save ₹{offer.savings} ({offer.discountPercentage}% OFF)
+                            </Text>
+                          </View>
+                        )}
                         <Text style={styles.stockText}>In Stock: {displayQuantity} {selectedProduct.unit}</Text>
                       </>
                     );
@@ -765,6 +800,64 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#64748b',
     fontWeight: '600',
+  },
+  cardStrikeMrp: {
+    fontSize: 10,
+    color: '#94A3B8',
+    textDecorationLine: 'line-through',
+    marginLeft: 6,
+    fontWeight: '500',
+  },
+  cardDiscountBadge: {
+    backgroundColor: '#DCFCE7',
+    borderWidth: 0.5,
+    borderColor: '#86EFAC',
+    borderRadius: 3,
+    paddingHorizontal: 4,
+    paddingVertical: 1,
+    marginLeft: 5,
+  },
+  cardDiscountBadgeText: {
+    color: '#15803D',
+    fontSize: 9,
+    fontWeight: '800',
+  },
+  modalStrikeMrp: {
+    fontSize: 13,
+    color: '#94A3B8',
+    textDecorationLine: 'line-through',
+    marginLeft: 8,
+    fontWeight: '500',
+  },
+  modalDiscountBadge: {
+    backgroundColor: '#DCFCE7',
+    borderWidth: 0.5,
+    borderColor: '#86EFAC',
+    borderRadius: 4,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    marginLeft: 6,
+  },
+  modalDiscountBadgeText: {
+    color: '#15803D',
+    fontSize: 11,
+    fontWeight: '800',
+  },
+  modalSavingsBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F0FDF4',
+    borderWidth: 1,
+    borderColor: '#BBF7D0',
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    marginBottom: 8,
+  },
+  modalSavingsBannerText: {
+    color: '#166534',
+    fontSize: 11,
+    fontWeight: '700',
   },
 });
 
