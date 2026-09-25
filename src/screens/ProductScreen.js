@@ -19,6 +19,7 @@ import { showAlert } from '../utils/alertUtils';
 
 import ProductFormModal from '../components/ProductFormModal';
 import FullScreenImageViewer from '../components/FullScreenImageViewer';
+import { calculateProductOffer } from '../utils/offerUtils';
 
 const isImageMedia = (media) => {
   if (!media) return false;
@@ -424,10 +425,25 @@ const ProductScreen = ({ route, navigation }) => {
                       ) : null}
                     </View>
                   </View>
-                  <Text style={styles.productCell}>
-                    ₹{item.amount}
-                    {item.unit ? `\n(${item.unit})` : ''}
-                  </Text>
+                  {(() => {
+                    const offer = calculateProductOffer(item);
+                    return (
+                      <View style={[styles.productCell, { alignItems: 'center', justifyContent: 'center' }]}>
+                        <Text style={{ fontSize: 13, fontWeight: '700', color: '#0F172A', textAlign: 'center' }}>
+                          ₹{offer.sellingPrice}
+                          {item.unit ? `\n(${item.unit})` : ''}
+                        </Text>
+                        {offer.hasOffer && (
+                          <View style={{ alignItems: 'center', marginTop: 3 }}>
+                            <Text style={styles.strikeMrp}>₹{offer.mrp}</Text>
+                            <View style={styles.tableOfferBadge}>
+                              <Text style={styles.tableOfferBadgeText}>{offer.badgeText}</Text>
+                            </View>
+                          </View>
+                        )}
+                      </View>
+                    );
+                  })()}
                   <Text style={[styles.productCell, { fontSize: 11, color: '#64748B' }]}>
                     {item.start_date ? new Date(item.start_date).toLocaleDateString() : '-'}
                     {item.end_date ? `\nto\n${new Date(item.end_date).toLocaleDateString()}` : ''}
@@ -762,6 +778,26 @@ const styles = StyleSheet.create({
     flex: 0.5,
     alignItems: 'flex-start',
     paddingLeft: 5,
+  },
+  strikeMrp: {
+    fontSize: 10,
+    color: '#94A3B8',
+    textDecorationLine: 'line-through',
+    fontWeight: '500',
+  },
+  tableOfferBadge: {
+    backgroundColor: '#DCFCE7',
+    borderWidth: 0.5,
+    borderColor: '#86EFAC',
+    borderRadius: 3,
+    paddingHorizontal: 4,
+    paddingVertical: 1,
+    marginTop: 1,
+  },
+  tableOfferBadgeText: {
+    color: '#15803D',
+    fontSize: 9,
+    fontWeight: '800',
   },
 });
 

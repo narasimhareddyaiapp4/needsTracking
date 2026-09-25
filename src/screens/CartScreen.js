@@ -14,6 +14,7 @@ import { getGuestCart, updateGuestCartItemQuantity, removeGuestCartItem } from '
 import Icon from 'react-native-vector-icons/FontAwesome';
 import StoreNavigationFooter from '../components/StoreNavigationFooter';
 import FullScreenImageViewer from '../components/FullScreenImageViewer';
+import { calculateProductOffer, calculateOrderDeliveryFee, calculateCartSavings } from '../utils/offerUtils';
 
 const CartScreen = ({ navigation, route }) => {
   const { sellerId, sellerName, customerId, isDirectQr } = route?.params || {};
@@ -23,6 +24,11 @@ const CartScreen = ({ navigation, route }) => {
   const [isViewerVisible, setIsViewerVisible] = useState(false);
   const [viewerImages, setViewerImages] = useState([]);
   const [viewerIndex, setViewerIndex] = useState(0);
+  const [sellerDeliveryConfig, setSellerDeliveryConfig] = useState({
+    enable_delivery: true,
+    default_delivery_fee: 30,
+    free_delivery_threshold: 200,
+  });
 
   const openCartImageViewer = (tappedItem) => {
     const items = cart?.cart_items || [];
@@ -77,15 +83,26 @@ const CartScreen = ({ navigation, route }) => {
     cart_items: (guestCartData || []).map(item => {
       const existingMedia = item.product_variant_combinations?.products?.product_media;
       const mediaUrl = item.image_url || (Array.isArray(existingMedia) && existingMedia[0]?.media_url) || null;
+      const sellingPrice = item.price !== undefined ? item.price : (item.product_variant_combinations?.price || 0);
+      const mrp = item.mrp !== undefined ? item.mrp : (item.product_variant_combinations?.mrp || item.product_variant_combinations?.products?.mrp || null);
+
       return {
         id: item.product_variant_combination_id || item.id,
         quantity: item.quantity,
+        price: sellingPrice,
+        mrp: mrp,
         product_variant_combinations: {
           id: item.product_variant_combination_id || item.id,
           combination_string: item.combination_string || 'Default',
-          price: item.price || 0,
+          price: sellingPrice,
+          mrp: mrp,
           products: {
+            id: item.product_variant_combinations?.products?.id,
             product_name: item.product_name || item.product_variant_combinations?.products?.product_name || 'Product',
+            amount: sellingPrice,
+            mrp: mrp,
+            user_id: item.product_variant_combinations?.products?.user_id,
+            customer_id: item.product_variant_combinations?.products?.customer_id,
             product_media: existingMedia && existingMedia.length > 0
               ? existingMedia
               : (mediaUrl ? [{ media_url: mediaUrl, media_type: 'image' }] : [])
@@ -100,18 +117,41 @@ const CartScreen = ({ navigation, route }) => {
       setLoading(true);
       const { data: { user } } = await supabase.auth.getUser();
       setUser(user);
+      let loadedCart = null;
       if (user) {
-        const cartData = await getCart(user.id);
-        setCart(cartData);
+        loadedCart = await getCart(user.id);
+        setCart(loadedCart);
       } else {
         const guestCartData = await getGuestCart();
-        setCart(normalizeGuestCart(guestCartData));
+        loadedCart = normalizeGuestCart(guestCartData);
+        setCart(loadedCart);
       }
+
+      // Resolve seller delivery rules (e.g. threshold >= ₹200)
+      const targetSeller = sellerId || loadedCart?.cart_items?.[0]?.product_variant_combinations?.products?.user_id || null;
+      if (targetSeller) {
+        try {
+          const { data: sellerProf } = await supabase
+            .from('profiles')
+            .select('enable_delivery, default_delivery_fee, free_delivery_threshold')
+            .eq('id', targetSeller)
+            .maybeSingle();
+
+          if (sellerProf) {
+            setSellerDeliveryConfig({
+              enable_delivery: sellerProf.enable_delivery !== false,
+              default_delivery_fee: sellerProf.default_delivery_fee !== null && sellerProf.default_delivery_fee !== undefined ? Number(sellerProf.default_delivery_fee) : 30,
+              free_delivery_threshold: sellerProf.free_delivery_threshold !== null && sellerProf.free_delivery_threshold !== undefined ? Number(sellerProf.free_delivery_threshold) : 200,
+            });
+          }
+        } catch (_) {}
+      }
+
       setLoading(false);
     };
 
     fetchUserAndCart();
-  }, []);
+  }, [sellerId]);
 
   const handleUpdateQuantity = async (cartItemId, quantity) => {
     if (quantity < 1) {
@@ -159,13 +199,18 @@ const CartScreen = ({ navigation, route }) => {
 
   const renderCartItem = ({ item }) => {
     const imageUrl = getItemImageUrl(item);
+    const combo = item?.product_variant_combinations;
+    const prod = combo?.products;
+    const itemOffer = calculateProductOffer(prod, combo);
+    const priceVal = combo?.price !== undefined ? combo.price : (item?.price || 0);
+
     return (
       <View style={styles.itemContainer}>
         {imageUrl ? (
           <TouchableOpacity
             activeOpacity={0.85}
             onPress={() => openCartImageViewer(item)}
-            accessibilityLabel={`View full image for ${item?.product_variant_combinations?.products?.product_name || 'Product'}`}
+            accessibilityLabel={`View full image for ${prod?.product_name || 'Product'}`}
           >
             <Image
               style={styles.itemImage}
@@ -179,9 +224,19 @@ const CartScreen = ({ navigation, route }) => {
           </View>
         )}
         <View style={styles.itemDetails}>
-          <Text style={styles.itemName}>{item?.product_variant_combinations?.products?.product_name || 'Product'}</Text>
-          <Text style={styles.itemVariant}>{item?.product_variant_combinations?.combination_string || ''}</Text>
-          <Text style={styles.itemPrice}>₹{item?.product_variant_combinations?.price || 0}</Text>
+          <Text style={styles.itemName}>{prod?.product_name || 'Product'}</Text>
+          <Text style={styles.itemVariant}>{combo?.combination_string || ''}</Text>
+          <View style={styles.itemPriceRow}>
+            <Text style={styles.itemPrice}>₹{priceVal}</Text>
+            {itemOffer.hasOffer && itemOffer.mrp ? (
+              <Text style={styles.itemStrikeMrp}>₹{itemOffer.mrp}</Text>
+            ) : null}
+            {itemOffer.hasOffer && itemOffer.badgeText ? (
+              <View style={styles.itemOfferBadge}>
+                <Text style={styles.itemOfferBadgeText}>{itemOffer.badgeText}</Text>
+              </View>
+            ) : null}
+          </View>
           <View style={styles.quantityContainer}>
             <TouchableOpacity onPress={() => handleUpdateQuantity(item.id, item.quantity - 1)} style={{ padding: 4 }}>
               <Icon name="minus-circle" size={24} color="#E53935" />
@@ -207,6 +262,9 @@ const CartScreen = ({ navigation, route }) => {
     0
   );
 
+  const cartSavings = calculateCartSavings(cart?.cart_items || []);
+  const deliveryCalc = calculateOrderDeliveryFee(totalAmount, sellerDeliveryConfig);
+
   const handleCheckout = () => {
     let customerIdToPass = null;
     if (user?.user_metadata?.customerId) {
@@ -222,7 +280,53 @@ const CartScreen = ({ navigation, route }) => {
       customerId: customerIdToPass || customerId,
       sellerId: resolvedSellerId,
       sellerName: sellerName,
+      sellerDeliveryConfig: sellerDeliveryConfig,
     });
+  };
+
+  const renderCartHeader = () => {
+    return (
+      <View style={styles.cartBannersWrapper}>
+        {/* Free Delivery Threshold Banner (e.g. Orders >= ₹200) */}
+        {sellerDeliveryConfig?.enable_delivery !== false && (
+          deliveryCalc.isFreeDelivery ? (
+            <View style={styles.freeDeliveryUnlockedBanner}>
+              <Icon name="truck" size={15} color="#059669" style={{ marginRight: 8 }} />
+              <Text style={styles.freeDeliveryUnlockedText}>
+                🎉 You unlocked <Text style={{ fontWeight: '800' }}>FREE Delivery</Text> on this order!
+              </Text>
+            </View>
+          ) : (
+            <View style={styles.freeDeliveryProgressBanner}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 6 }}>
+                <Icon name="motorcycle" size={15} color="#D97706" style={{ marginRight: 8 }} />
+                <Text style={styles.freeDeliveryProgressText}>
+                  Add <Text style={{ fontWeight: '800', color: '#B45309' }}>₹{deliveryCalc.amountNeededForFree.toFixed(0)}</Text> more for <Text style={{ fontWeight: '800', color: '#059669' }}>FREE Delivery</Text>!
+                </Text>
+              </View>
+              <View style={styles.progressBarTrack}>
+                <View
+                  style={[
+                    styles.progressBarFill,
+                    { width: `${Math.min(100, Math.max(8, (totalAmount / (deliveryCalc.freeThreshold || 200)) * 100))}%` },
+                  ]}
+                />
+              </View>
+            </View>
+          )
+        )}
+
+        {/* Total Cart Savings on MRP Banner */}
+        {cartSavings.hasSavings && (
+          <View style={styles.cartSavingsBanner}>
+            <Icon name="tags" size={14} color="#059669" style={{ marginRight: 8 }} />
+            <Text style={styles.cartSavingsBannerText}>
+              🎉 You are saving <Text style={{ fontWeight: '800' }}>₹{cartSavings.totalSavings.toFixed(2)}</Text> with offers on this order!
+            </Text>
+          </View>
+        )}
+      </View>
+    );
   };
 
   if (loading) {
@@ -314,6 +418,7 @@ const CartScreen = ({ navigation, route }) => {
       <FlatList
         data={cart.cart_items}
         renderItem={renderCartItem}
+        ListHeaderComponent={renderCartHeader}
         keyExtractor={(item) => item.id.toString()}
         style={[
           styles.list,
@@ -332,6 +437,9 @@ const CartScreen = ({ navigation, route }) => {
             Total ({cart.cart_items.length} {cart.cart_items.length === 1 ? 'item' : 'items'})
           </Text>
           <Text style={styles.footerTotalAmount}>₹{totalAmount.toFixed(2)}</Text>
+          {cartSavings.hasSavings ? (
+            <Text style={styles.footerSavingsTag}>Saved ₹{cartSavings.totalSavings.toFixed(0)} with offers</Text>
+          ) : null}
         </View>
         <TouchableOpacity
           style={styles.checkoutButton}
@@ -552,6 +660,101 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 14,
     fontWeight: '700',
+  },
+  itemPriceRow: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    gap: 6,
+    marginTop: 4,
+  },
+  itemStrikeMrp: {
+    fontSize: 12,
+    color: '#94A3B8',
+    textDecorationLine: 'line-through',
+    fontWeight: '500',
+  },
+  itemOfferBadge: {
+    backgroundColor: '#DCFCE7',
+    borderWidth: 0.5,
+    borderColor: '#86EFAC',
+    borderRadius: 3,
+    paddingHorizontal: 5,
+    paddingVertical: 1,
+  },
+  itemOfferBadgeText: {
+    color: '#15803D',
+    fontSize: 10,
+    fontWeight: '800',
+  },
+  cartBannersWrapper: {
+    marginBottom: 12,
+  },
+  freeDeliveryUnlockedBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#ECFDF5',
+    borderWidth: 1,
+    borderColor: '#A7F3D0',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    marginBottom: 8,
+  },
+  freeDeliveryUnlockedText: {
+    fontSize: 12.5,
+    color: '#065F46',
+    fontWeight: '600',
+    flex: 1,
+  },
+  freeDeliveryProgressBanner: {
+    backgroundColor: '#FFFBEB',
+    borderWidth: 1,
+    borderColor: '#FDE68A',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    marginBottom: 8,
+  },
+  freeDeliveryProgressText: {
+    fontSize: 12.5,
+    color: '#92400E',
+    fontWeight: '600',
+    flex: 1,
+  },
+  progressBarTrack: {
+    height: 6,
+    backgroundColor: '#FDE68A',
+    borderRadius: 3,
+    overflow: 'hidden',
+    width: '100%',
+  },
+  progressBarFill: {
+    height: '100%',
+    backgroundColor: '#F59E0B',
+    borderRadius: 3,
+  },
+  cartSavingsBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F0FDF4',
+    borderWidth: 1,
+    borderColor: '#BBF7D0',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    marginBottom: 8,
+  },
+  cartSavingsBannerText: {
+    fontSize: 12.5,
+    color: '#15803D',
+    fontWeight: '600',
+    flex: 1,
+  },
+  footerSavingsTag: {
+    fontSize: 10.5,
+    color: '#15803D',
+    fontWeight: '700',
+    marginTop: 2,
   },
 });
 

@@ -17,6 +17,7 @@ import InventoryHistory from '../components/InventoryHistory';
 import { barcodeService } from '../services/barcodeService';
 import { FontAwesome as Icon } from '@expo/vector-icons';
 import BarcodeScannerModal from '../components/BarcodeScannerModal';
+import BarcodeLabelPrintModal from '../components/BarcodeLabelPrintModal';
 
 const InventoryScreen = ({ route }) => {
   const { session, userId } = route.params || {};
@@ -44,6 +45,12 @@ const InventoryScreen = ({ route }) => {
   const [newPurity, setNewPurity] = useState('');
   const [newNetWeight, setNewNetWeight] = useState('');
   const [newRoomNo, setNewRoomNo] = useState('');
+
+  // Barcode Label Print & Generation State
+  const [printModalVisible, setPrintModalVisible] = useState(false);
+  const [barcodeToPrint, setBarcodeToPrint] = useState(null);
+  const [barcodeTypeToGenerate, setBarcodeTypeToGenerate] = useState('CODE128'); // 'CODE128' | 'EAN13'
+  const [generatingBarcode, setGeneratingBarcode] = useState(false);
 
   useEffect(() => {
     if (userId) {
@@ -267,6 +274,47 @@ const InventoryScreen = ({ route }) => {
         },
       },
     ]);
+  };
+
+  // Auto-generate a new unique barcode
+  const handleGenerateBarcode = async () => {
+    setGeneratingBarcode(true);
+    try {
+      const res = await barcodeService.generateUniqueBarcode({
+        type: barcodeTypeToGenerate,
+        prefix: 'NW',
+        sku: selectedItem?.sku || '',
+      });
+      if (res.success && res.barcode) {
+        setNewBarcode(res.barcode);
+        Alert.alert(
+          'Barcode Generated',
+          `Created unique ${res.barcodeType} barcode:\n${res.barcode}\n\nYou can now save the mapping or print label tags!`
+        );
+      }
+    } catch (err) {
+      console.error('Error generating barcode:', err);
+      Alert.alert('Error', 'Failed to generate barcode.');
+    } finally {
+      setGeneratingBarcode(false);
+    }
+  };
+
+  // Open barcode label printing modal
+  const handleOpenPrintModal = (bc = null) => {
+    if (bc) {
+      setBarcodeToPrint(bc);
+    } else if (itemBarcodes && itemBarcodes.length > 0) {
+      setBarcodeToPrint(itemBarcodes[0]);
+    } else if (selectedItem) {
+      setBarcodeToPrint({
+        barcode: newBarcode.trim() || selectedItem.sku || `NW${Date.now().toString().slice(-8)}`,
+        packaging_unit: newPackagingUnit || 'piece',
+        multiplier: parseInt(newMultiplier, 10) || 1,
+        serial_number: newSerialNumber ? newSerialNumber.trim() : null,
+      });
+    }
+    setPrintModalVisible(true);
   };
 
   const handleAdjustQuantity = async () => {
@@ -540,10 +588,24 @@ const InventoryScreen = ({ route }) => {
               {/* Tab 3: Multiple Barcodes Manager */}
               {activeTab === 'barcodes' && (
                 <View style={styles.detailsContainer}>
-                  <Text style={styles.modalTitle}>Manage Multiple Barcodes</Text>
-                  <Text style={styles.barcodeSubheader}>
-                    Registered barcodes for: {selectedItem.products?.product_name} ({selectedItem.combination_string})
-                  </Text>
+                  <View style={styles.barcodeTabHeaderRow}>
+                    <View style={{ flex: 1, marginRight: 8 }}>
+                      <Text style={styles.modalTitle}>Manage Multiple Barcodes</Text>
+                      <Text style={styles.barcodeSubheader}>
+                        Registered barcodes for: {selectedItem.products?.product_name} ({selectedItem.combination_string})
+                      </Text>
+                    </View>
+                    <TouchableOpacity
+                      style={styles.printAllBarcodesBtn}
+                      onPress={() => handleOpenPrintModal(itemBarcodes[0] || null)}
+                      accessibilityLabel="Print Barcode Labels"
+                    >
+                      <Icon name="print" size={13} color="#FFFFFF" style={{ marginRight: 6 }} />
+                      <Text style={styles.printAllBarcodesBtnText}>
+                        Print Labels
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
 
                   {/* List of existing barcodes */}
                   {loadingBarcodes ? (
@@ -553,7 +615,7 @@ const InventoryScreen = ({ route }) => {
                   ) : (
                     itemBarcodes.map((bc) => (
                       <View key={bc.id} style={styles.barcodeItemRow}>
-                        <View style={{ flex: 1 }}>
+                        <View style={{ flex: 1, marginRight: 8 }}>
                           <Text style={styles.barcodeText}>{bc.barcode}</Text>
                           <Text style={styles.barcodeUnitInfo}>
                             Unit: <Text style={{ fontWeight: 'bold' }}>{bc.packaging_unit}</Text> | Multiplier: <Text style={{ fontWeight: 'bold' }}>x{bc.multiplier}</Text>
@@ -566,20 +628,67 @@ const InventoryScreen = ({ route }) => {
                             <Text style={styles.barcodeMetadataText}>Room: {bc.metadata.room_no}</Text>
                           ) : null}
                         </View>
-                        <TouchableOpacity
-                          style={styles.deleteBarcodeBtn}
-                          onPress={() => handleDeleteBarcode(bc.id, bc.barcode)}
-                        >
-                          <Text style={styles.deleteBarcodeText}>✕</Text>
-                        </TouchableOpacity>
+                        <View style={styles.barcodeRowActions}>
+                          <TouchableOpacity
+                            style={styles.printBarcodeBtn}
+                            onPress={() => handleOpenPrintModal(bc)}
+                            accessibilityLabel="Print Barcode Label"
+                          >
+                            <Icon name="print" size={12} color="#007AFF" style={{ marginRight: 4 }} />
+                            <Text style={styles.printBarcodeBtnText}>Print</Text>
+                          </TouchableOpacity>
+                          <TouchableOpacity
+                            style={styles.deleteBarcodeBtn}
+                            onPress={() => handleDeleteBarcode(bc.id, bc.barcode)}
+                          >
+                            <Text style={styles.deleteBarcodeText}>✕</Text>
+                          </TouchableOpacity>
+                        </View>
                       </View>
                     ))
                   )}
 
                   {/* Add New Barcode Form */}
                   <View style={styles.addBarcodeSection}>
-                    <Text style={styles.sectionHeader}>+ Map New Barcode</Text>
-                    
+                    <Text style={styles.sectionHeader}>+ Create or Map Barcode</Text>
+
+                    {/* Barcode Type Selector */}
+                    <View style={styles.barcodeTypeSelectorRow}>
+                      <Text style={styles.barcodeTypeLabel}>Type:</Text>
+                      <TouchableOpacity
+                        style={[
+                          styles.barcodeTypeChip,
+                          barcodeTypeToGenerate === 'CODE128' && styles.barcodeTypeChipActive,
+                        ]}
+                        onPress={() => setBarcodeTypeToGenerate('CODE128')}
+                      >
+                        <Text
+                          style={[
+                            styles.barcodeTypeChipText,
+                            barcodeTypeToGenerate === 'CODE128' && styles.barcodeTypeChipTextActive,
+                          ]}
+                        >
+                          Code-128
+                        </Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={[
+                          styles.barcodeTypeChip,
+                          barcodeTypeToGenerate === 'EAN13' && styles.barcodeTypeChipActive,
+                        ]}
+                        onPress={() => setBarcodeTypeToGenerate('EAN13')}
+                      >
+                        <Text
+                          style={[
+                            styles.barcodeTypeChipText,
+                            barcodeTypeToGenerate === 'EAN13' && styles.barcodeTypeChipTextActive,
+                          ]}
+                        >
+                          EAN-13
+                        </Text>
+                      </TouchableOpacity>
+                    </View>
+
                     <View style={styles.barcodeInputWithScanRow}>
                       <TextInput
                         style={[styles.input, { flex: 1, marginBottom: 0 }]}
@@ -588,6 +697,21 @@ const InventoryScreen = ({ route }) => {
                         onChangeText={setNewBarcode}
                         autoCapitalize="none"
                       />
+                      <TouchableOpacity
+                        style={styles.fieldGenButton}
+                        onPress={handleGenerateBarcode}
+                        disabled={generatingBarcode}
+                        accessibilityLabel="Auto-Generate Barcode"
+                      >
+                        {generatingBarcode ? (
+                          <ActivityIndicator size="small" color="#FFFFFF" />
+                        ) : (
+                          <>
+                            <Icon name="bolt" size={13} color="#FFFFFF" style={{ marginRight: 4 }} />
+                            <Text style={styles.fieldGenButtonText}>Generate</Text>
+                          </>
+                        )}
+                      </TouchableOpacity>
                       <TouchableOpacity
                         style={styles.fieldScanButton}
                         onPress={() => setScannerModalMode('mapping')}
@@ -652,7 +776,22 @@ const InventoryScreen = ({ route }) => {
                       onChangeText={setNewRoomNo}
                     />
 
-                    <Button title="Save Barcode Mapping" onPress={handleAddBarcode} />
+                    <View style={{ marginTop: 6 }}>
+                      <Button title="Save Barcode Mapping" onPress={handleAddBarcode} />
+                    </View>
+
+                    {newBarcode.trim().length > 0 && (
+                      <TouchableOpacity
+                        style={styles.printPreviewQuickBtn}
+                        onPress={() => handleOpenPrintModal()}
+                        accessibilityLabel="Print Label Preview"
+                      >
+                        <Icon name="print" size={13} color="#007AFF" style={{ marginRight: 6 }} />
+                        <Text style={styles.printPreviewQuickBtnText}>
+                          Print Label for "{newBarcode.trim()}"
+                        </Text>
+                      </TouchableOpacity>
+                    )}
                   </View>
                 </View>
               )}
@@ -695,6 +834,14 @@ const InventoryScreen = ({ route }) => {
             : 'Scan barcode to check stock, audit, or adjust inventory'
         }
         defaultContinuous={false}
+      />
+
+      {/* Barcode Label Print Modal */}
+      <BarcodeLabelPrintModal
+        visible={printModalVisible}
+        onClose={() => setPrintModalVisible(false)}
+        item={selectedItem}
+        barcodeData={barcodeToPrint}
       />
     </View>
   );
@@ -1046,6 +1193,113 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: '#334155',
     marginBottom: 10,
+  },
+  barcodeTabHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 4,
+  },
+  printAllBarcodesBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#0284c7',
+    paddingVertical: 7,
+    paddingHorizontal: 12,
+    borderRadius: 6,
+    shadowColor: '#0284c7',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.2,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  printAllBarcodesBtnText: {
+    color: '#ffffff',
+    fontSize: 12.5,
+    fontWeight: '700',
+  },
+  barcodeRowActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  printBarcodeBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#eff6ff',
+    borderWidth: 1,
+    borderColor: '#bfdbfe',
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    borderRadius: 4,
+  },
+  printBarcodeBtnText: {
+    color: '#007AFF',
+    fontWeight: '600',
+    fontSize: 12,
+  },
+  barcodeTypeSelectorRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 10,
+    gap: 8,
+  },
+  barcodeTypeLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#475569',
+  },
+  barcodeTypeChip: {
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 6,
+    backgroundColor: '#f1f5f9',
+    borderWidth: 1,
+    borderColor: '#cbd5e1',
+  },
+  barcodeTypeChipActive: {
+    backgroundColor: '#0284c7',
+    borderColor: '#0284c7',
+  },
+  barcodeTypeChipText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#475569',
+  },
+  barcodeTypeChipTextActive: {
+    color: '#ffffff',
+  },
+  fieldGenButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#059669',
+    paddingHorizontal: 10,
+    paddingVertical: 10,
+    borderRadius: 6,
+    marginLeft: 6,
+    justifyContent: 'center',
+  },
+  fieldGenButtonText: {
+    color: '#ffffff',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  printPreviewQuickBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#eff6ff',
+    borderWidth: 1,
+    borderColor: '#93c5fd',
+    borderRadius: 6,
+    paddingVertical: 9,
+    paddingHorizontal: 12,
+    marginTop: 10,
+  },
+  printPreviewQuickBtnText: {
+    color: '#007AFF',
+    fontSize: 13,
+    fontWeight: '700',
   },
 });
 

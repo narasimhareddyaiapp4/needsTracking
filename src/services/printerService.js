@@ -1890,4 +1890,335 @@ export const printStoreStandee = async ({
   }
 };
 
+/**
+ * Generates ESC/POS command bytes to print a standalone Barcode Label / Price Sticker
+ * onto 58mm / 80mm thermal printers or label rolls.
+ *
+ * @param {object} labelData - Product and barcode metadata
+ * @param {object} config - Printer configuration
+ */
+export const generateBarcodeLabelEscPosBytes = (labelData = {}, config = DEFAULT_PRINTER_CONFIG) => {
+  const width = getLineCharWidth(config.paperWidth);
+  const is80mm = config.paperWidth === '80mm';
+  const currencySymbol = (config.currencySymbol && config.currencySymbol !== '₹') ? config.currencySymbol : 'Rs.';
+  const encoder = new TextEncoder();
+
+  const ESC = 0x1b;
+  const FS = 0x1c;
+  const GS = 0x1d;
+
+  const CMD_INIT = [ESC, 0x40];
+  const CMD_CANCEL_KANJI = [FS, 0x2e];
+  const CMD_CODEPAGE_PC437 = [ESC, 0x74, 0x00];
+  const CMD_CHARSET_USA = [ESC, 0x52, 0x00];
+  const CMD_ALIGN_CENTER = [ESC, 0x61, 0x01];
+  const CMD_BOLD_ON = [ESC, 0x45, 0x01];
+  const CMD_BOLD_OFF = [ESC, 0x45, 0x00];
+  const CMD_DOUBLE_HEIGHT = [GS, 0x21, 0x01];
+  const CMD_NORMAL_SIZE = [GS, 0x21, 0x00];
+
+  const copies = Math.max(1, Math.min(100, parseInt(labelData.copies, 10) || 1));
+  const rawBarcode = String(labelData.barcode || '').trim();
+  const cleanBarcode = rawBarcode.replace(/[^A-Za-z0-9_-]/g, '').trim();
+
+  let byteChunks = [];
+  const addBytes = (bytes) => {
+    byteChunks.push(new Uint8Array(bytes));
+  };
+  const addText = (text) => {
+    const clean = sanitizeThermalText(text, currencySymbol);
+    byteChunks.push(encoder.encode(clean + '\n'));
+  };
+
+  for (let c = 0; c < copies; c++) {
+    // 1. Initialize printer and codepage
+    addBytes(CMD_INIT);
+    addBytes(CMD_CANCEL_KANJI);
+    addBytes(CMD_CODEPAGE_PC437);
+    addBytes(CMD_CHARSET_USA);
+    addBytes(CMD_ALIGN_CENTER);
+
+    // 2. Store Name Header (Optional)
+    if (labelData.includeStoreName !== false) {
+      const store = sanitizeThermalText(labelData.storeName || config.storeName || "STORE", currencySymbol);
+      if (store) {
+        addBytes(CMD_BOLD_ON);
+        addText(store);
+        addBytes(CMD_BOLD_OFF);
+      }
+    }
+
+    // 3. Product Name (Bold)
+    const prodName = sanitizeThermalText(labelData.productName || 'PRODUCT', currencySymbol);
+    if (prodName) {
+      addBytes(CMD_BOLD_ON);
+      addText(prodName);
+      addBytes(CMD_BOLD_OFF);
+    }
+
+    // 4. Variant description (if present & not 'Default')
+    const variantStr = labelData.variantName && labelData.variantName.toLowerCase() !== 'default'
+      ? labelData.variantName
+      : '';
+    if (labelData.includeVariant !== false && variantStr) {
+      addText(`(${variantStr})`);
+    }
+
+    // 5. Price (Double height, Bold)
+    if (labelData.includePrice !== false && labelData.price !== undefined && labelData.price !== null) {
+      addBytes(CMD_BOLD_ON);
+      addBytes(CMD_DOUBLE_HEIGHT);
+      addText(`Price: ${currencySymbol} ${safeFormatPrice(labelData.price, currencySymbol)}`);
+      addBytes(CMD_NORMAL_SIZE);
+      addBytes(CMD_BOLD_OFF);
+    }
+
+    // 6. 1D Barcode (Code-128 via ESC/POS command)
+    if (cleanBarcode.length > 0 && cleanBarcode.length <= 32) {
+      try {
+        addBytes(CMD_ALIGN_CENTER);
+        addBytes([GS, 0x68, 56]); // Barcode height (56 dots)
+        addBytes([GS, 0x77, is80mm ? 3 : 2]); // Module width (2 for 58mm, 3 for 80mm)
+        addBytes([GS, 0x48, 2]); // HRI chars below barcode
+        addBytes([GS, 0x66, 0]); // Font A
+        const bcBytes = encoder.encode(cleanBarcode);
+        addBytes([GS, 0x6b, 73, bcBytes.length, ...bcBytes]);
+        addBytes([ESC, 0x64, 1]); // Small line feed
+      } catch (_) {}
+    }
+
+    // 7. Additional Info / Packaging / Serial / SKU / Weights
+    const extraDetails = [];
+    if (labelData.sku) extraDetails.push(`SKU: ${labelData.sku}`);
+    if (labelData.packagingUnit && labelData.packagingUnit !== 'piece') {
+      extraDetails.push(`Unit: ${labelData.packagingUnit}${labelData.multiplier > 1 ? ` (x${labelData.multiplier})` : ''}`);
+    }
+    if (labelData.serialNumber) extraDetails.push(`SN: ${labelData.serialNumber}`);
+    if (labelData.metadata?.purity) extraDetails.push(`Purity: ${labelData.metadata.purity}`);
+    if (labelData.metadata?.net_weight_gm) extraDetails.push(`Wt: ${labelData.metadata.net_weight_gm}g`);
+    if (labelData.metadata?.room_no) extraDetails.push(`Room: ${labelData.metadata.room_no}`);
+
+    if (extraDetails.length > 0) {
+      addText(extraDetails.join(' | '));
+    }
+
+    // 8. Feed spacing and cut / tear line between copies
+    if (config.cutPaper) {
+      addBytes([ESC, 0x64, 2, GS, 0x56, 0x42, 0x00]);
+    } else {
+      addBytes([ESC, 0x64, (config.bottomFeedLines || 2)]);
+      if (c < copies - 1) {
+        addText(getSeparator(width));
+      }
+    }
+  }
+
+  // Combine byte chunks into single Uint8Array
+  let totalLength = 0;
+  for (const chunk of byteChunks) totalLength += chunk.length;
+  const mergedBytes = new Uint8Array(totalLength);
+  let offset = 0;
+  for (const chunk of byteChunks) {
+    mergedBytes.set(chunk, offset);
+    offset += chunk.length;
+  }
+  return mergedBytes;
+};
+
+/**
+ * Generates an HTML document containing Barcode Sticker Labels
+ * formatted for thermal label printers (58mm / 80mm) or sticker sheets.
+ */
+export const generateBarcodeLabelHtml = (labelData = {}, config = DEFAULT_PRINTER_CONFIG) => {
+  const is80mm = config.paperWidth === '80mm';
+  const currencySymbol = (config.currencySymbol && config.currencySymbol !== '₹') ? config.currencySymbol : 'Rs.';
+  const storeName = escapeHtml(labelData.storeName || config.storeName || "Store");
+  const prodName = escapeHtml(labelData.productName || 'Product');
+  const variantStr = labelData.variantName && labelData.variantName.toLowerCase() !== 'default'
+    ? escapeHtml(labelData.variantName)
+    : '';
+  const priceVal = safeFormatPrice(labelData.price, currencySymbol);
+  const rawBarcode = String(labelData.barcode || '').trim();
+  const cleanBarcode = rawBarcode.replace(/[^A-Za-z0-9_-]/g, '').trim();
+  const copies = Math.max(1, Math.min(100, parseInt(labelData.copies, 10) || 1));
+
+  // Extra details line
+  const metaParts = [];
+  if (labelData.sku) metaParts.push(`SKU: ${escapeHtml(labelData.sku)}`);
+  if (labelData.packagingUnit && labelData.packagingUnit !== 'piece') {
+    metaParts.push(`Unit: ${escapeHtml(labelData.packagingUnit)}${labelData.multiplier > 1 ? ` (x${labelData.multiplier})` : ''}`);
+  }
+  if (labelData.serialNumber) metaParts.push(`SN: ${escapeHtml(labelData.serialNumber)}`);
+  if (labelData.metadata?.purity) metaParts.push(`Purity: ${escapeHtml(labelData.metadata.purity)}`);
+  if (labelData.metadata?.net_weight_gm) metaParts.push(`Wt: ${escapeHtml(labelData.metadata.net_weight_gm)}g`);
+  if (labelData.metadata?.room_no) metaParts.push(`Room: ${escapeHtml(labelData.metadata.room_no)}`);
+  const metaLine = metaParts.join(' • ');
+
+  const barcodeSvg = cleanBarcode
+    ? generateCode128Svg(cleanBarcode, { height: is80mm ? 46 : 38, barWidth: is80mm ? 1.5 : 1.3 })
+    : '';
+
+  let labelsHtml = '';
+  for (let i = 0; i < copies; i++) {
+    labelsHtml += `
+      <div class="label-card">
+        ${labelData.includeStoreName !== false && storeName ? `<div class="store-name">${storeName}</div>` : ''}
+        <div class="product-name">${prodName}</div>
+        ${labelData.includeVariant !== false && variantStr ? `<div class="variant-name">${variantStr}</div>` : ''}
+        ${labelData.includePrice !== false && labelData.price !== undefined && labelData.price !== null ? `<div class="price-line"><span class="price-cur">${escapeHtml(currencySymbol)}</span> ${priceVal}</div>` : ''}
+        <div class="barcode-box">
+          ${barcodeSvg}
+        </div>
+        ${metaLine ? `<div class="meta-line">${metaLine}</div>` : ''}
+      </div>
+    `;
+  }
+
+  return `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Barcode Labels</title>
+  <style>
+    @page {
+      margin: 2mm;
+      size: auto;
+    }
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+    body {
+      background: #ffffff;
+      color: #000000;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+      padding: 4px;
+    }
+    .labels-container {
+      width: 100%;
+      max-width: ${is80mm ? '78mm' : '56mm'};
+      margin: 0 auto;
+    }
+    .label-card {
+      border: 1px dashed #cbd5e1;
+      border-radius: 4px;
+      padding: 8px 6px;
+      margin-bottom: 8px;
+      text-align: center;
+      background: #ffffff;
+      page-break-inside: avoid;
+      page-break-after: always;
+      break-after: page;
+    }
+    .store-name {
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: #334155;
+      margin-bottom: 2px;
+    }
+    .product-name {
+      font-size: 13px;
+      font-weight: 800;
+      line-height: 1.2;
+      color: #000000;
+      margin-bottom: 2px;
+      word-break: break-word;
+    }
+    .variant-name {
+      font-size: 11px;
+      font-weight: 600;
+      color: #475569;
+      margin-bottom: 3px;
+    }
+    .price-line {
+      font-size: 15px;
+      font-weight: 900;
+      color: #000000;
+      margin: 2px 0 4px 0;
+    }
+    .price-cur {
+      font-size: 12px;
+      font-weight: 700;
+    }
+    .barcode-box {
+      margin: 4px auto;
+      text-align: center;
+      max-width: 100%;
+    }
+    .barcode-box svg {
+      margin: 0 auto;
+      display: block;
+    }
+    .meta-line {
+      font-size: 9px;
+      font-weight: 600;
+      color: #475569;
+      margin-top: 3px;
+      word-break: break-word;
+    }
+    @media print {
+      body {
+        padding: 0;
+      }
+      .label-card {
+        border: none;
+        margin-bottom: 0;
+        padding: 4px 2px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="labels-container">
+    ${labelsHtml}
+  </div>
+</body>
+</html>
+  `;
+};
+
+/**
+ * Universal Barcode Label Print execution:
+ * Prints product barcode stickers to Web Bluetooth thermal printer or Web/System Print.
+ */
+export const printBarcodeLabel = async (labelData, options = {}) => {
+  if (!labelData || !labelData.barcode) {
+    Alert.alert('Error', 'Missing barcode data to print.');
+    return { success: false, error: 'No barcode data provided' };
+  }
+
+  const config = await getPrinterConfig();
+  const merged = { ...labelData, ...options };
+
+  // 1. If Web Bluetooth characteristic is connected
+  if (activeCharacteristic) {
+    try {
+      const rawBytes = generateBarcodeLabelEscPosBytes(merged, config);
+      await sendBytesViaWebBluetooth(rawBytes);
+      return { success: true, mode: 'bluetooth' };
+    } catch (bleErr) {
+      console.warn('[PrinterService] Direct BLE barcode print failed, falling back to system print:', bleErr);
+    }
+  }
+
+  // 2. Universal printing: Web iframe or expo-print
+  try {
+    const html = generateBarcodeLabelHtml(merged, config);
+    if (Platform.OS === 'web' && typeof document !== 'undefined') {
+      return await printHtmlOnWeb(html);
+    } else {
+      await Print.printAsync({ html });
+      return { success: true, mode: 'system' };
+    }
+  } catch (printErr) {
+    console.error('[PrinterService] Barcode print error:', printErr);
+    throw printErr;
+  }
+};
+
+
 

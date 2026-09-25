@@ -52,6 +52,7 @@ import {
   resolveUploadedQrDetails,
   formatUpiTransactionNote,
 } from '../services/qrScanService';
+import { calculateOrderDeliveryFee, calculateCartSavings, calculateProductOffer } from '../utils/offerUtils';
 
 const CheckoutScreen = ({ navigation, route }) => {
   const { cart: initialCart, customerId } = route?.params || {};
@@ -367,7 +368,18 @@ const CheckoutScreen = ({ navigation, route }) => {
   const sgstAmount = isTaxEnabled && subtotal > 0 ? Math.round(subtotal * (sgstRate / 100) * 100) / 100 : 0;
   const serviceCost = isServiceCostEnabled && subtotal > 0 && serviceCostRate > 0 ? Math.round(subtotal * (serviceCostRate / 100) * 100) / 100 : 0;
 
-  const totalAmount = subtotal + cgstAmount + sgstAmount + serviceCost;
+  const isParcelDelivery = orderType === 'Parcel' || orderType === 'Delivery';
+  const deliveryConfig = route?.params?.sellerDeliveryConfig || {
+    enable_delivery: sellerProfile?.enable_delivery !== false,
+    default_delivery_fee: sellerProfile?.default_delivery_fee !== null && sellerProfile?.default_delivery_fee !== undefined ? Number(sellerProfile.default_delivery_fee) : 30,
+    free_delivery_threshold: sellerProfile?.free_delivery_threshold !== null && sellerProfile?.free_delivery_threshold !== undefined ? Number(sellerProfile.free_delivery_threshold) : 200,
+  };
+  const deliveryInfo = calculateOrderDeliveryFee(subtotal, deliveryConfig);
+  const deliveryFee = isParcelDelivery ? deliveryInfo.deliveryFee : 0;
+  const deliveryPartnerPayout = isParcelDelivery ? deliveryInfo.partnerPayout : 0;
+  const cartSavings = calculateCartSavings(cartItems);
+
+  const totalAmount = subtotal + cgstAmount + sgstAmount + serviceCost + deliveryFee;
 
   const tableOptions = ['Main counter', ...Array.from({ length: 10 }, (_, i) => (i + 1).toString())];
 
@@ -421,16 +433,16 @@ const CheckoutScreen = ({ navigation, route }) => {
         try {
           const { data, error } = await supabase
             .from('profiles')
-            .select('id, full_name, mobile, email, media_urls, upi_id')
+            .select('id, full_name, mobile, email, media_urls, upi_id, enable_delivery, default_delivery_fee, free_delivery_threshold, delivery_partner_type')
             .eq('id', targetSellerId)
             .maybeSingle();
 
           if (data) {
             profData = data;
-          } else if (error && error.message?.includes('upi_id')) {
+          } else if (error) {
             const { data: fallbackData } = await supabase
               .from('profiles')
-              .select('id, full_name, mobile, email, media_urls')
+              .select('id, full_name, mobile, email, media_urls, upi_id')
               .eq('id', targetSellerId)
               .maybeSingle();
             profData = fallbackData;
@@ -1337,8 +1349,9 @@ const CheckoutScreen = ({ navigation, route }) => {
         const groupSubtotal = sellerGroup.subtotal;
         const groupCgst = isTaxEnabled && groupSubtotal > 0 ? Math.round(groupSubtotal * (cgstRate / 100) * 100) / 100 : 0;
         const groupSgst = isTaxEnabled && groupSubtotal > 0 ? Math.round(groupSubtotal * (sgstRate / 100) * 100) / 100 : 0;
-        const groupService = isServiceCostEnabled && groupSubtotal > 0 && serviceCostRate > 0 ? Math.round(groupSubtotal * (serviceCostRate / 100) * 100) / 100 : 0;
-        const groupTotal = groupSubtotal + groupCgst + groupSgst + groupService;
+        const groupDeliveryFee = isDineIn ? 0 : deliveryFee;
+        const groupPartnerPayout = isDineIn ? 0 : deliveryPartnerPayout;
+        const groupTotal = groupSubtotal + groupCgst + groupSgst + groupService + groupDeliveryFee;
 
         const billingBreakdown = {
           subtotal: groupSubtotal,
@@ -1348,6 +1361,9 @@ const CheckoutScreen = ({ navigation, route }) => {
           cgst_rate: cgstRate,
           sgst_rate: sgstRate,
           service_cost_rate: serviceCostRate,
+          delivery_fee: groupDeliveryFee,
+          delivery_partner_payout: groupPartnerPayout,
+          is_free_delivery: isDineIn ? true : deliveryInfo.isFreeDelivery,
           total: groupTotal,
         };
 
@@ -1385,6 +1401,8 @@ const CheckoutScreen = ({ navigation, route }) => {
           cgst_rate: cgstRate,
           sgst_rate: sgstRate,
           service_cost_rate: serviceCostRate,
+          delivery_fee: groupDeliveryFee,
+          delivery_partner_payout: groupPartnerPayout,
           status: orderStatus,
           payment_method: activeMethod,
           payment_reference: uniquePaymentCode,
@@ -2060,32 +2078,61 @@ const CheckoutScreen = ({ navigation, route }) => {
           <Text style={styles.summaryItems}>
             {cartItems.length} {cartItems.length === 1 ? 'item' : 'items'} in cart
           </Text>
-          {(isTaxEnabled || (isServiceCostEnabled && serviceCost > 0)) && (
-            <View style={{ marginTop: 8, borderTopWidth: 1, borderTopColor: '#E2E8F0', paddingTop: 8 }}>
-              <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 }}>
-                <Text style={{ fontSize: 13, color: '#64748B' }}>Items Subtotal</Text>
-                <Text style={{ fontSize: 13, fontWeight: '600', color: '#1E293B' }}>₹{subtotal.toFixed(2)}</Text>
-              </View>
-              {isTaxEnabled && cgstAmount > 0 && (
-                <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 }}>
-                  <Text style={{ fontSize: 13, color: '#64748B' }}>CGST ({cgstRate}%)</Text>
-                  <Text style={{ fontSize: 13, fontWeight: '600', color: '#1E293B' }}>+₹{cgstAmount.toFixed(2)}</Text>
-                </View>
-              )}
-              {isTaxEnabled && sgstAmount > 0 && (
-                <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 }}>
-                  <Text style={{ fontSize: 13, color: '#64748B' }}>SGST ({sgstRate}%)</Text>
-                  <Text style={{ fontSize: 13, fontWeight: '600', color: '#1E293B' }}>+₹{sgstAmount.toFixed(2)}</Text>
-                </View>
-              )}
-              {isServiceCostEnabled && serviceCost > 0 && (
-                <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 }}>
-                  <Text style={{ fontSize: 13, color: '#64748B' }}>Service Charge ({serviceCostRate}%)</Text>
-                  <Text style={{ fontSize: 13, fontWeight: '600', color: '#1E293B' }}>+₹{serviceCost.toFixed(2)}</Text>
-                </View>
-              )}
+          <View style={{ marginTop: 8, borderTopWidth: 1, borderTopColor: '#E2E8F0', paddingTop: 8 }}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 }}>
+              <Text style={{ fontSize: 13, color: '#64748B' }}>Items Subtotal</Text>
+              <Text style={{ fontSize: 13, fontWeight: '600', color: '#1E293B' }}>₹{subtotal.toFixed(2)}</Text>
             </View>
-          )}
+            {cartSavings.hasSavings && (
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 }}>
+                <Text style={{ fontSize: 13, color: '#059669', fontWeight: '600' }}>Offer Savings</Text>
+                <Text style={{ fontSize: 13, fontWeight: '700', color: '#059669' }}>-₹{cartSavings.totalSavings.toFixed(2)}</Text>
+              </View>
+            )}
+            {isParcelDelivery && (
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 }}>
+                <Text style={{ fontSize: 13, color: '#64748B' }}>Delivery Fee</Text>
+                {deliveryInfo.isFreeDelivery ? (
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                    <Text style={{ fontSize: 12, color: '#94A3B8', textDecorationLine: 'line-through' }}>
+                      ₹{deliveryInfo.baseDeliveryFee.toFixed(2)}
+                    </Text>
+                    <Text style={{ fontSize: 13, fontWeight: '700', color: '#059669' }}>FREE</Text>
+                  </View>
+                ) : (
+                  <Text style={{ fontSize: 13, fontWeight: '600', color: '#1E293B' }}>
+                    +₹{deliveryInfo.deliveryFee.toFixed(2)}
+                  </Text>
+                )}
+              </View>
+            )}
+            {isTaxEnabled && cgstAmount > 0 && (
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 }}>
+                <Text style={{ fontSize: 13, color: '#64748B' }}>CGST ({cgstRate}%)</Text>
+                <Text style={{ fontSize: 13, fontWeight: '600', color: '#1E293B' }}>+₹{cgstAmount.toFixed(2)}</Text>
+              </View>
+            )}
+            {isTaxEnabled && sgstAmount > 0 && (
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 }}>
+                <Text style={{ fontSize: 13, color: '#64748B' }}>SGST ({sgstRate}%)</Text>
+                <Text style={{ fontSize: 13, fontWeight: '600', color: '#1E293B' }}>+₹{sgstAmount.toFixed(2)}</Text>
+              </View>
+            )}
+            {isServiceCostEnabled && serviceCost > 0 && (
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 }}>
+                <Text style={{ fontSize: 13, color: '#64748B' }}>Service Charge ({serviceCostRate}%)</Text>
+                <Text style={{ fontSize: 13, fontWeight: '600', color: '#1E293B' }}>+₹{serviceCost.toFixed(2)}</Text>
+              </View>
+            )}
+            {isParcelDelivery && !deliveryInfo.isFreeDelivery && (
+              <View style={styles.checkoutFreeDeliveryHint}>
+                <Icon name="motorcycle" size={11} color="#D97706" style={{ marginRight: 5 }} />
+                <Text style={styles.checkoutFreeDeliveryHintText}>
+                  Add ₹{deliveryInfo.amountNeededForFree.toFixed(0)} more items for FREE Delivery!
+                </Text>
+              </View>
+            )}
+          </View>
           <Text style={styles.summaryTotal}>Total: ₹{totalAmount.toFixed(2)}</Text>
         </View>
 
@@ -5427,6 +5474,22 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '600',
     color: '#007AFF',
+  },
+  checkoutFreeDeliveryHint: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFFBEB',
+    borderWidth: 1,
+    borderColor: '#FDE68A',
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    marginTop: 6,
+  },
+  checkoutFreeDeliveryHintText: {
+    fontSize: 11,
+    color: '#92400E',
+    fontWeight: '600',
   },
 });
 

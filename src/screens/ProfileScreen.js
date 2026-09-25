@@ -131,6 +131,12 @@ const ProfileScreen = ({ navigation, route }) => {
   const [voiceGender, setVoiceGender] = useState('female');
   const [testingVoice, setTestingVoice] = useState(false);
 
+  // Delivery Partner Fee & Free Delivery Threshold Settings
+  const [enableDelivery, setEnableDelivery] = useState(true);
+  const [defaultDeliveryFee, setDefaultDeliveryFee] = useState('30');
+  const [freeDeliveryThreshold, setFreeDeliveryThreshold] = useState('200');
+  const [deliveryPartnerType, setDeliveryPartnerType] = useState('platform');
+
   // Web Notification Permission State
   const [webNotifPermission, setWebNotifPermission] = useState(
     Platform.OS === 'web' ? getWebNotificationPermission() : 'n/a'
@@ -571,6 +577,19 @@ const ProfileScreen = ({ navigation, route }) => {
               setPrinterConfig(merged);
               savePrinterConfig(merged);
             });
+          }
+
+          if (data.enable_delivery !== undefined && data.enable_delivery !== null) {
+            setEnableDelivery(Boolean(data.enable_delivery));
+          }
+          if (data.default_delivery_fee !== undefined && data.default_delivery_fee !== null) {
+            setDefaultDeliveryFee(String(data.default_delivery_fee));
+          }
+          if (data.free_delivery_threshold !== undefined && data.free_delivery_threshold !== null) {
+            setFreeDeliveryThreshold(String(data.free_delivery_threshold));
+          }
+          if (data.delivery_partner_type) {
+            setDeliveryPartnerType(data.delivery_partner_type);
           }
 
           // Extract Store & Product Active Settings
@@ -1108,6 +1127,10 @@ const ProfileScreen = ({ navigation, route }) => {
         enable_service_cost: printerConfig?.enableServiceCost === true,
         service_cost_rate: printerConfig?.serviceCostRate !== undefined ? Number(printerConfig.serviceCostRate) : 0,
         print_tax_breakdown: printerConfig?.printTaxBreakdown !== false,
+        enable_delivery: enableDelivery,
+        default_delivery_fee: !isNaN(parseFloat(defaultDeliveryFee)) ? parseFloat(defaultDeliveryFee) : 30.00,
+        free_delivery_threshold: !isNaN(parseFloat(freeDeliveryThreshold)) ? parseFloat(freeDeliveryThreshold) : 200.00,
+        delivery_partner_type: deliveryPartnerType,
         theme_preference: themeMode || 'system',
         updated_at: new Date().toISOString(),
       };
@@ -1128,7 +1151,7 @@ const ProfileScreen = ({ navigation, route }) => {
         .maybeSingle();
 
       if (profileError && (profileError.code === 'PGRST204' || profileError.message?.includes('column'))) {
-        console.warn('Retrying profile upsert without tax, theme, or upi_id columns:', profileError.message);
+        console.warn('Retrying profile upsert without tax, theme, delivery, or upi_id columns:', profileError.message);
         const fallbackUpdates = { ...updates };
         delete fallbackUpdates.enable_tax;
         delete fallbackUpdates.cgst_rate;
@@ -1136,6 +1159,10 @@ const ProfileScreen = ({ navigation, route }) => {
         delete fallbackUpdates.enable_service_cost;
         delete fallbackUpdates.service_cost_rate;
         delete fallbackUpdates.print_tax_breakdown;
+        delete fallbackUpdates.enable_delivery;
+        delete fallbackUpdates.default_delivery_fee;
+        delete fallbackUpdates.free_delivery_threshold;
+        delete fallbackUpdates.delivery_partner_type;
         delete fallbackUpdates.theme_preference;
         delete fallbackUpdates.upi_id;
         const retryResult = await supabase.from('profiles').upsert(fallbackUpdates, { onConflict: 'id' }).select().maybeSingle();
@@ -3167,6 +3194,67 @@ const ProfileScreen = ({ navigation, route }) => {
           </TouchableOpacity>
         </View>
       )}
+
+      {/* Delivery Partner & Free Delivery Threshold Settings Card */}
+      <View style={styles.printerCard}>
+        <View style={styles.printerCardHeader}>
+          <Icon name="truck" size={18} color="#059669" style={{ marginRight: 8 }} />
+          <Text style={styles.printerCardTitle}>Delivery Partner & Fee Settings</Text>
+        </View>
+
+        <Text style={styles.printerSectionDesc}>
+          Configure your store's customer delivery charges, free delivery threshold (e.g. Orders ≥ ₹200), and rider payout rules.
+        </Text>
+
+        <View style={styles.printerToggleRow}>
+          <View style={{ flex: 1, marginRight: 12 }}>
+            <Text style={styles.printerToggleTitle}>Enable Customer Delivery</Text>
+            <Text style={styles.printerToggleSub}>
+              Allow buyers to select Parcel / Delivery orders to their doorstep.
+            </Text>
+          </View>
+          <Switch
+            value={enableDelivery}
+            onValueChange={setEnableDelivery}
+            trackColor={{ false: '#CBD5E1', true: '#A7F3D0' }}
+            thumbColor={enableDelivery ? '#059669' : '#F1F5F9'}
+          />
+        </View>
+
+        {enableDelivery && (
+          <>
+            <View style={styles.printerDivider} />
+            <View style={styles.profileTaxInputRow}>
+              <View style={{ flex: 1, marginRight: 8 }}>
+                <Text style={styles.profileTaxInputLabel}>Default Delivery Fee (₹)</Text>
+                <TextInput
+                  style={styles.profileTaxInputField}
+                  value={defaultDeliveryFee}
+                  onChangeText={setDefaultDeliveryFee}
+                  placeholder="30"
+                  keyboardType="decimal-pad"
+                />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.profileTaxInputLabel}>Free Delivery Above (₹)</Text>
+                <TextInput
+                  style={styles.profileTaxInputField}
+                  value={freeDeliveryThreshold}
+                  onChangeText={setFreeDeliveryThreshold}
+                  placeholder="200"
+                  keyboardType="decimal-pad"
+                />
+              </View>
+            </View>
+
+            <View style={{ backgroundColor: '#ECFDF5', borderWidth: 1, borderColor: '#A7F3D0', borderRadius: 6, padding: 10, marginTop: 10 }}>
+              <Text style={{ fontSize: 12, color: '#065F46', lineHeight: 17 }}>
+                💡 <Text style={{ fontWeight: '700' }}>Industry Standard Rule:</Text> Orders total &lt; ₹{freeDeliveryThreshold || '200'} charge ₹{defaultDeliveryFee || '30'} delivery fee. Orders total ≥ ₹{freeDeliveryThreshold || '200'} unlock 100% <Text style={{ fontWeight: '700' }}>FREE Delivery</Text> for customers.
+              </Text>
+            </View>
+          </>
+        )}
+      </View>
 
       {Platform.OS === 'web' && (
         <View style={styles.webNotifCard}>

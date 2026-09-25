@@ -935,6 +935,27 @@ const OrderDetailScreen = ({ navigation, route }) => {
                       <Text style={{ fontSize: 13, fontWeight: '600', color: '#1E293B' }}>+₹{detailService.toFixed(2)}</Text>
                     </View>
                   )}
+                  {(() => {
+                    const dFee = Number(order.delivery_fee !== undefined && order.delivery_fee !== null ? order.delivery_fee : (orderBilling?.delivery_fee !== undefined ? orderBilling.delivery_fee : 0));
+                    const freeDeliv = orderBilling?.is_free_delivery === true || (order.delivery_fee === 0 && detailSubtotal >= 200);
+                    if (dFee > 0) {
+                      return (
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 }}>
+                          <Text style={{ fontSize: 13, color: '#64748B' }}>Delivery Fee</Text>
+                          <Text style={{ fontSize: 13, fontWeight: '600', color: '#1E293B' }}>+₹{dFee.toFixed(2)}</Text>
+                        </View>
+                      );
+                    }
+                    if (freeDeliv && (order.order_type === 'shop-order' || order.order_type === 'Parcel')) {
+                      return (
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 }}>
+                          <Text style={{ fontSize: 13, color: '#64748B' }}>Delivery Fee</Text>
+                          <Text style={{ fontSize: 13, fontWeight: '700', color: '#059669' }}>FREE</Text>
+                        </View>
+                      );
+                    }
+                    return null;
+                  })()}
                 </View>
               )}
               <View style={styles.amountRow}>

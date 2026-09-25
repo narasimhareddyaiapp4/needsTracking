@@ -43,7 +43,7 @@ export const PRODUCT_CATEGORIES = DEFAULT_MASTER_CATEGORIES.map(c => ({
 }));
 
 
-const generateVariantCombinations = (variants, basePrice = 0) => {
+const generateVariantCombinations = (variants, basePrice = 0, baseMrp = null) => {
   const activeVariants = (variants || [])
     .map(v => {
       const name = (v.name || '').trim();
@@ -54,6 +54,9 @@ const generateVariantCombinations = (variants, basePrice = 0) => {
           price: typeof o === 'object' && o?.price !== undefined && o?.price !== '' && o?.price !== null
             ? (parseFloat(o.price) || 0)
             : undefined,
+          mrp: typeof o === 'object' && o?.mrp !== undefined && o?.mrp !== '' && o?.mrp !== null
+            ? (parseFloat(o.mrp) || null)
+            : undefined,
           quantity: typeof o === 'object' && o?.quantity !== undefined && o?.quantity !== '' && o?.quantity !== null
             ? (parseInt(o.quantity, 10) || 100)
             : undefined,
@@ -63,18 +66,21 @@ const generateVariantCombinations = (variants, basePrice = 0) => {
     })
     .filter(v => v.name.length > 0 && v.variant_options.length > 0);
 
+  const parsedBaseMrp = baseMrp ? parseFloat(baseMrp) || null : null;
+
   if (activeVariants.length === 0) {
-    return [{ combination_string: 'Default', sku: '', price: basePrice, quantity: 100 }];
+    return [{ combination_string: 'Default', sku: '', price: basePrice, mrp: parsedBaseMrp, quantity: 100 }];
   }
 
   let combinations = [];
 
-  const generate = (index, currentParts, currentSku, lastPrice, lastQuantity) => {
+  const generate = (index, currentParts, currentSku, lastPrice, lastMrp, lastQuantity) => {
     if (index === activeVariants.length) {
       combinations.push({
         combination_string: currentParts.join(', '),
         sku: currentSku,
         price: lastPrice !== undefined && lastPrice !== null ? (parseFloat(lastPrice) || 0) : basePrice,
+        mrp: lastMrp !== undefined && lastMrp !== null ? (parseFloat(lastMrp) || null) : parsedBaseMrp,
         quantity: lastQuantity !== undefined && lastQuantity !== null ? (parseInt(lastQuantity, 10) || 100) : 100,
       });
       return;
@@ -83,26 +89,29 @@ const generateVariantCombinations = (variants, basePrice = 0) => {
     const variant = activeVariants[index];
     for (const option of variant.variant_options) {
       const optPrice = (option.price !== undefined && option.price !== '' && option.price !== null) ? option.price : lastPrice;
+      const optMrp = (option.mrp !== undefined && option.mrp !== '' && option.mrp !== null) ? option.mrp : lastMrp;
       const optQty = (option.quantity !== undefined && option.quantity !== '' && option.quantity !== null) ? option.quantity : lastQuantity;
       generate(
         index + 1,
         [...currentParts, `${variant.name}:${option.value}`],
         currentSku ? `${currentSku}-${option.value}` : option.value,
         optPrice,
+        optMrp,
         optQty
       );
     }
   };
 
-  generate(0, [], '', undefined, undefined);
+  generate(0, [], '', undefined, undefined, undefined);
   return combinations;
 };
 
-const syncVariantCombinations = (variants, currentCombos = [], baseAmount = 0) => {
+const syncVariantCombinations = (variants, currentCombos = [], baseAmount = 0, baseMrp = null) => {
   const basePrice = parseFloat(baseAmount) || 0;
-  const generated = generateVariantCombinations(variants, basePrice);
+  const parsedBaseMrp = baseMrp ? parseFloat(baseMrp) || null : null;
+  const generated = generateVariantCombinations(variants, basePrice, parsedBaseMrp);
 
-  const hasActiveVariants = (variants || []) .some(
+  const hasActiveVariants = (variants || []).some(
     v => (v.name || '').trim() && (v.variant_options || []).some(o => ((typeof o === 'string' ? o : o?.value) || '').trim())
   );
 
@@ -112,6 +121,7 @@ const syncVariantCombinations = (variants, currentCombos = [], baseAmount = 0) =
       combination_string: 'Default',
       sku: existingDefault?.sku || '',
       price: basePrice,
+      mrp: existingDefault?.mrp !== undefined ? existingDefault.mrp : parsedBaseMrp,
       quantity: existingDefault?.quantity !== undefined ? existingDefault.quantity : 100,
     }];
   }
@@ -126,6 +136,7 @@ const syncVariantCombinations = (variants, currentCombos = [], baseAmount = 0) =
       ...newCombo,
       id: match?.id,
       price: (newCombo.price !== undefined && newCombo.price !== null) ? newCombo.price : (match?.price !== undefined ? match.price : basePrice),
+      mrp: (newCombo.mrp !== undefined && newCombo.mrp !== null) ? newCombo.mrp : (match?.mrp !== undefined ? match.mrp : parsedBaseMrp),
       quantity: (newCombo.quantity !== undefined && newCombo.quantity !== null) ? newCombo.quantity : (match?.quantity !== undefined ? match.quantity : 100),
       sku: match?.sku || newCombo.sku || '',
     };
@@ -149,6 +160,7 @@ const ProductFormModal = ({ isVisible, onClose, onSubmit, productToEdit, custome
   const [productName, setProductName] = useState('');
   const [description, setDescription] = useState('');
   const [amount, setAmount] = useState('');
+  const [mrp, setMrp] = useState('');
   const [productType, setProductType] = useState('grocery');
   const [categoriesList, setCategoriesList] = useState([]);
   const [subcategoriesList, setSubcategoriesList] = useState([]);
@@ -227,6 +239,7 @@ const ProductFormModal = ({ isVisible, onClose, onSubmit, productToEdit, custome
       setProductName(productToEdit.product_name || '');
       setDescription(productToEdit.description || '');
       setAmount(productToEdit.amount !== undefined && productToEdit.amount !== null ? productToEdit.amount.toString() : '');
+      setMrp(productToEdit.mrp !== undefined && productToEdit.mrp !== null ? productToEdit.mrp.toString() : '');
       setProductType(productToEdit.product_type || 'grocery');
       setSubcategoryId(productToEdit.subcategory_id || productToEdit.subcategory || '');
       setSubcategoryName(productToEdit.subcategory || '');
@@ -266,6 +279,7 @@ const ProductFormModal = ({ isVisible, onClose, onSubmit, productToEdit, custome
             ...(typeof o === 'object' ? o : { value: o }),
             value: optVal,
             price: matchCombo?.price !== undefined ? matchCombo.price : (o.price !== undefined ? o.price : productToEdit.amount),
+            mrp: matchCombo?.mrp !== undefined ? matchCombo.mrp : (o.mrp !== undefined ? o.mrp : (productToEdit.mrp || null)),
             quantity: matchCombo?.quantity !== undefined ? matchCombo.quantity : (o.quantity !== undefined ? o.quantity : 100),
           };
         }),
@@ -275,12 +289,13 @@ const ProductFormModal = ({ isVisible, onClose, onSubmit, productToEdit, custome
       if (loadedCombinations.length > 0) {
         setVariantCombinations(loadedCombinations);
       } else {
-        setVariantCombinations(syncVariantCombinations(loadedVariants, [], productToEdit.amount));
+        setVariantCombinations(syncVariantCombinations(loadedVariants, [], productToEdit.amount, productToEdit.mrp));
       }
     } else {
       setProductName('');
       setDescription('');
       setAmount('');
+      setMrp('');
       setProductType('grocery');
       setSubcategoryId('');
       setSubcategoryName('');
@@ -298,6 +313,7 @@ const ProductFormModal = ({ isVisible, onClose, onSubmit, productToEdit, custome
         combination_string: 'Default',
         sku: '',
         price: 0,
+        mrp: null,
         quantity: 100,
       }]);
     }
@@ -305,7 +321,7 @@ const ProductFormModal = ({ isVisible, onClose, onSubmit, productToEdit, custome
 
   const handleVariantsChange = (newVariants) => {
     setProductVariants(newVariants);
-    setVariantCombinations(prevCombos => syncVariantCombinations(newVariants, prevCombos, amount));
+    setVariantCombinations(prevCombos => syncVariantCombinations(newVariants, prevCombos, amount, mrp));
   };
 
   const handleAmountChange = (newAmount) => {
@@ -321,12 +337,36 @@ const ProductFormModal = ({ isVisible, onClose, onSubmit, productToEdit, custome
     });
   };
 
+  const handleMrpChange = (newMrp) => {
+    setMrp(newMrp);
+    setVariantCombinations(prevCombos => {
+      if (prevCombos.length === 1 && prevCombos[0].combination_string === 'Default') {
+        return [{
+          ...prevCombos[0],
+          mrp: (newMrp !== '' && !isNaN(parseFloat(newMrp))) ? parseFloat(newMrp) : null,
+        }];
+      }
+      return prevCombos;
+    });
+  };
+
   const handleComboPriceChange = (index, text) => {
     setVariantCombinations(prevCombos => {
       const updated = [...prevCombos];
       updated[index] = {
         ...updated[index],
         price: text === '' ? '' : (parseFloat(text) || text),
+      };
+      return updated;
+    });
+  };
+
+  const handleComboMrpChange = (index, text) => {
+    setVariantCombinations(prevCombos => {
+      const updated = [...prevCombos];
+      updated[index] = {
+        ...updated[index],
+        mrp: text === '' ? null : (parseFloat(text) || text),
       };
       return updated;
     });
@@ -407,11 +447,14 @@ const ProductFormModal = ({ isVisible, onClose, onSubmit, productToEdit, custome
     const selectedCatId = matchingCat?.id && matchingCat.id !== matchingCat.code ? matchingCat.id : null;
     const selectedSub = subcategoriesList.find(s => s.id === subcategoryId || s.code === subcategoryId);
 
+    const parsedMrp = (mrp !== '' && !isNaN(parseFloat(mrp))) ? parseFloat(mrp) : null;
+
     const productData = {
       user_id: userId,
       product_name: productName,
       description: description,
       amount: parseFloat(amount),
+      mrp: parsedMrp,
       product_type: matchingCat?.code || productType,
       unit: unit,
       start_date: startDate.toISOString().split('T')[0],
@@ -446,6 +489,9 @@ const ProductFormModal = ({ isVisible, onClose, onSubmit, productToEdit, custome
         delete fallbackData.category_id;
         delete fallbackData.subcategory_id;
         delete fallbackData.subcategory;
+        if (error.message && error.message.includes('mrp')) {
+          delete fallbackData.mrp;
+        }
         const retry = await supabase.from('products').update(fallbackData).eq('id', productToEdit.id).select();
         data = retry.data;
         error = retry.error;
@@ -500,12 +546,15 @@ const ProductFormModal = ({ isVisible, onClose, onSubmit, productToEdit, custome
 
         const combosToSave = (activeVariants.length > 0 && variantCombinations && variantCombinations.length > 0)
           ? variantCombinations
-          : [{ combination_string: 'Default', sku: '', price: parseFloat(amount) || 0, quantity: validDefaultQty }];
+          : [{ combination_string: 'Default', sku: '', price: parseFloat(amount) || 0, mrp: parsedMrp, quantity: validDefaultQty }];
 
         for (const combo of combosToSave) {
           const priceVal = typeof combo.price === 'number'
             ? combo.price
             : (parseFloat(combo.price) || parseFloat(amount) || 0);
+          const mrpVal = combo.mrp !== undefined && combo.mrp !== null && combo.mrp !== '' && !isNaN(parseFloat(combo.mrp))
+            ? parseFloat(combo.mrp)
+            : parsedMrp;
           const qtyVal = typeof combo.quantity === 'number'
             ? combo.quantity
             : (parseInt(combo.quantity, 10) !== undefined && !isNaN(parseInt(combo.quantity, 10)) ? parseInt(combo.quantity, 10) : validDefaultQty);
@@ -514,6 +563,7 @@ const ProductFormModal = ({ isVisible, onClose, onSubmit, productToEdit, custome
             product_id: productResult.id,
             combination_string: combo.combination_string || 'Default',
             price: priceVal,
+            mrp: mrpVal,
             quantity: qtyVal,
             sku: combo.sku || '',
           });
@@ -582,11 +632,38 @@ const ProductFormModal = ({ isVisible, onClose, onSubmit, productToEdit, custome
             <Text style={styles.label}>Base Price / Amount (₹)</Text>
             <TextInput
               style={styles.input}
-              placeholder="Enter base amount / price"
+              placeholder="Enter selling price (e.g. 150)"
               value={amount}
               onChangeText={handleAmountChange}
               keyboardType="numeric"
             />
+
+            <Text style={styles.label}>MRP / Original Price (₹) (Optional - for Offer / Discount)</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="e.g. 200 (strike-through price)"
+              value={mrp}
+              onChangeText={handleMrpChange}
+              keyboardType="numeric"
+            />
+
+            {(() => {
+              const sellP = parseFloat(amount) || 0;
+              const origP = parseFloat(mrp) || 0;
+              if (origP > sellP && sellP > 0) {
+                const disc = Math.round(((origP - sellP) / origP) * 100);
+                const sav = Math.round((origP - sellP) * 100) / 100;
+                return (
+                  <View style={styles.liveOfferBadgeBox}>
+                    <Text style={styles.liveOfferBadgeText}>
+                      🎉 Live Offer: {disc}% OFF (Buyer saves ₹{sav.toFixed(2)})
+                    </Text>
+                  </View>
+                );
+              }
+              return null;
+            })()}
+
             <Text style={styles.label}>Product Category</Text>
             <Picker
               selectedValue={productType}
@@ -650,6 +727,7 @@ const ProductFormModal = ({ isVisible, onClose, onSubmit, productToEdit, custome
               variants={productVariants}
               onVariantsChange={handleVariantsChange}
               baseAmount={amount}
+              baseMrp={mrp}
               unit={unit}
             />
 
@@ -724,6 +802,16 @@ const ProductFormModal = ({ isVisible, onClose, onSubmit, productToEdit, custome
                             placeholder="0.00"
                             value={combo.price !== undefined && combo.price !== null ? combo.price.toString() : ''}
                             onChangeText={(text) => handleComboPriceChange(index, text)}
+                            keyboardType="numeric"
+                          />
+                        </View>
+                        <View style={styles.comboInputGroup}>
+                          <Text style={styles.comboInputLabel}>MRP (₹)</Text>
+                          <TextInput
+                            style={styles.comboInput}
+                            placeholder="Optional"
+                            value={combo.mrp !== undefined && combo.mrp !== null ? combo.mrp.toString() : ''}
+                            onChangeText={(text) => handleComboMrpChange(index, text)}
                             keyboardType="numeric"
                           />
                         </View>
@@ -1192,6 +1280,21 @@ const styles = StyleSheet.create({
   },
   modalMediaNavButtonRight: {
     right: 10,
+  },
+  liveOfferBadgeBox: {
+    backgroundColor: '#ecfdf5',
+    borderWidth: 1,
+    borderColor: '#a7f3d0',
+    borderRadius: 6,
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    marginBottom: 10,
+    alignSelf: 'flex-start',
+  },
+  liveOfferBadgeText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#059669',
   },
 });
 

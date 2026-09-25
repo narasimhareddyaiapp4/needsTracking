@@ -52,6 +52,7 @@ import { getActiveEmployeeSession } from '../services/employeeService';
 import { barcodeService } from '../services/barcodeService';
 import { playNotificationChime } from '../services/speechService';
 import BarcodeScannerModal from '../components/BarcodeScannerModal';
+import { calculateProductOffer } from '../utils/offerUtils';
 
 const { width } = Dimensions.get('window');
 const SUBCAT_VIEW_MODE_KEY = '@catalog_subcat_view_mode';
@@ -898,12 +899,16 @@ const CatalogScreen = ({ navigation, route }) => {
                     combination_string: combination.combination_string,
                     quantity: newQuantity,
                     price: combination.price || product.amount || 0,
+                    mrp: combination.mrp || product.mrp || null,
                     product_name: product.product_name,
                     product_variant_combinations: { 
-                        ...combination, 
+                        ...combination,
+                        mrp: combination.mrp || product.mrp || null,
                         products: { 
                           id: product.id, 
                           product_name: product.product_name, 
+                          amount: product.amount,
+                          mrp: product.mrp || null,
                           product_media: product.product_media 
                         } 
                     }
@@ -1214,6 +1219,16 @@ const CatalogScreen = ({ navigation, route }) => {
     const firstMedia = (item.product_media || []).find(m => isImageMedia(m) && (m.media_url || m.uri));
     const imageUrl = firstMedia ? (firstMedia.media_url || firstMedia.uri) : (item.image_url || null);
 
+    const defaultOffer = calculateProductOffer(item, singleCombo);
+    const maxComboDiscount = combos.reduce((max, c) => {
+      const o = calculateProductOffer(item, c);
+      return o.hasOffer && o.discountPercentage > max ? o.discountPercentage : max;
+    }, 0);
+    const hasOffer = defaultOffer.hasOffer || maxComboDiscount > 0;
+    const offerBadgeText = defaultOffer.hasOffer
+      ? defaultOffer.badgeText
+      : (maxComboDiscount > 0 ? `UP TO ${maxComboDiscount}% OFF` : null);
+
     return (
       <View style={[styles.productContainer, isHorizontalScreen && { maxWidth: `${100 / numColumns}%` }]}>
         <View style={{ position: 'relative' }}>
@@ -1234,6 +1249,13 @@ const CatalogScreen = ({ navigation, route }) => {
               </View>
             )}
           </TouchableOpacity>
+
+          {/* Offer Discount Badge on top-left of image */}
+          {hasOffer && offerBadgeText ? (
+            <View style={styles.cardOfferRibbon}>
+              <Text style={styles.cardOfferRibbonText}>{offerBadgeText}</Text>
+            </View>
+          ) : null}
 
           {/* Top action buttons: Share (Highlight Mode) & Favorite */}
           <View style={styles.cardTopActions}>
@@ -1298,7 +1320,12 @@ const CatalogScreen = ({ navigation, route }) => {
           <TouchableOpacity onPress={() => openProductModal(item)}>
             <Text style={styles.productName} numberOfLines={2}>{item.product_name || ''}</Text>
           </TouchableOpacity>
-          <Text style={styles.productPrice}>{getPriceDisplay(item)}</Text>
+          <View style={styles.cardPriceRow}>
+            <Text style={styles.productPrice}>{getPriceDisplay(item)}</Text>
+            {defaultOffer.hasOffer && defaultOffer.mrp && !isMultiVariant ? (
+              <Text style={styles.cardStrikeMrp}>₹{defaultOffer.mrp}</Text>
+            ) : null}
+          </View>
           <Text style={styles.stockText}>
             In Stock: {totalStock} {item.unit || ''}
           </Text>
@@ -2416,6 +2443,20 @@ const CatalogScreen = ({ navigation, route }) => {
                   {selectedProduct?.description ? (
                     <Text style={styles.swiggyProductDesc}>{selectedProduct.description}</Text>
                   ) : null}
+                  {(() => {
+                    const modalOffer = calculateProductOffer(selectedProduct);
+                    if (modalOffer.hasOffer) {
+                      return (
+                        <View style={styles.swiggyModalOfferBanner}>
+                          <Icon name="tag" size={12} color="#059669" style={{ marginRight: 6 }} />
+                          <Text style={styles.swiggyModalOfferBannerText}>
+                            Special Offer: {modalOffer.badgeText} (Save ₹{modalOffer.savings})
+                          </Text>
+                        </View>
+                      );
+                    }
+                    return null;
+                  })()}
                 </View>
                 {(() => {
                   const combos = getProductCombinations(selectedProduct);
@@ -2514,6 +2555,20 @@ const CatalogScreen = ({ navigation, route }) => {
 
                                 <View style={styles.swiggyPriceStockRow}>
                                   <Text style={styles.swiggyOptionPriceText}>{`₹${comboPrice}`}</Text>
+                                  {(() => {
+                                    const optOffer = calculateProductOffer(selectedProduct, combo);
+                                    if (optOffer.hasOffer) {
+                                      return (
+                                        <>
+                                          <Text style={styles.swiggyStrikeMrp}>{`₹${optOffer.mrp}`}</Text>
+                                          <View style={styles.swiggyDiscountBadge}>
+                                            <Text style={styles.swiggyDiscountBadgeText}>{optOffer.badgeText}</Text>
+                                          </View>
+                                        </>
+                                      );
+                                    }
+                                    return null;
+                                  })()}
                                   <Text style={[styles.swiggyStockText, isOutOfStock && styles.swiggyStockOutText]}>
                                     {isOutOfStock ? '• Out of Stock' : `• In Stock: ${stockQty} ${selectedProduct.unit || 'units'}`}
                                   </Text>
@@ -4158,6 +4213,77 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '700',
     color: '#EF4444',
+  },
+  cardOfferRibbon: {
+    position: 'absolute',
+    top: 6,
+    left: 6,
+    backgroundColor: '#16A34A',
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+    borderRadius: 4,
+    zIndex: 10,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.18,
+    shadowRadius: 2,
+    elevation: 3,
+  },
+  cardOfferRibbonText: {
+    color: '#FFFFFF',
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 0.3,
+  },
+  cardPriceRow: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    gap: 6,
+    marginTop: 4,
+  },
+  cardStrikeMrp: {
+    fontSize: 12,
+    color: '#94A3B8',
+    textDecorationLine: 'line-through',
+    fontWeight: '500',
+  },
+  swiggyModalOfferBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#ECFDF5',
+    borderWidth: 1,
+    borderColor: '#A7F3D0',
+    borderRadius: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    marginTop: 8,
+    alignSelf: 'flex-start',
+  },
+  swiggyModalOfferBannerText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#059669',
+  },
+  swiggyStrikeMrp: {
+    fontSize: 12,
+    color: '#94A3B8',
+    textDecorationLine: 'line-through',
+    fontWeight: '500',
+    marginRight: 6,
+  },
+  swiggyDiscountBadge: {
+    backgroundColor: '#DCFCE7',
+    borderWidth: 0.5,
+    borderColor: '#86EFAC',
+    borderRadius: 3,
+    paddingHorizontal: 5,
+    paddingVertical: 1,
+    marginRight: 6,
+  },
+  swiggyDiscountBadgeText: {
+    color: '#15803D',
+    fontSize: 10,
+    fontWeight: '800',
   },
 });
 

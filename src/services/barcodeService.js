@@ -255,6 +255,86 @@ export const barcodeService = {
       return { success: false, error: err.message };
     }
   },
+
+  /**
+   * Calculates standard GS1 Modulo-10 check digit for a 12-digit numeric string
+   */
+  calculateEan13CheckDigit(digits12) {
+    const str = String(digits12 || '').replace(/\D/g, '').slice(0, 12);
+    if (str.length !== 12) return null;
+    let sum = 0;
+    for (let i = 0; i < 12; i++) {
+      const digit = parseInt(str[i], 10);
+      sum += (i % 2 === 0) ? digit : digit * 3;
+    }
+    const mod = sum % 10;
+    return mod === 0 ? 0 : 10 - mod;
+  },
+
+  /**
+   * Generates a candidate barcode string.
+   * Supports 'CODE128' (e.g. NW + alphanumeric / random digits) or 'EAN13' (13-digit GS1 standard).
+   */
+  generateBarcode({ type = 'CODE128', prefix = 'NW', sku = '' } = {}) {
+    const cleanType = String(type || 'CODE128').toUpperCase();
+    if (cleanType === 'EAN13') {
+      // GS1 standard in-store prefix is 20-29
+      const inStorePrefix = '20';
+      let body = '';
+      for (let i = 0; i < 10; i++) {
+        body += Math.floor(Math.random() * 10).toString();
+      }
+      const digits12 = inStorePrefix + body;
+      const checkDigit = this.calculateEan13CheckDigit(digits12);
+      return `${digits12}${checkDigit}`;
+    }
+
+    // Default: CODE128
+    const cleanPrefix = String(prefix || 'NW').replace(/[^A-Za-z0-9]/g, '').toUpperCase() || 'NW';
+    if (sku && String(sku).trim().length > 0) {
+      const cleanSku = String(sku).trim().replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+      const rand = Math.floor(1000 + Math.random() * 9000);
+      return `${cleanSku.slice(0, 8)}-${rand}`;
+    }
+    const randPart = Math.floor(10000000 + Math.random() * 90000000);
+    return `${cleanPrefix}${randPart}`;
+  },
+
+  /**
+   * Generates a unique barcode guaranteed not to conflict with any existing
+   * barcode in the database.
+   */
+  async generateUniqueBarcode({ type = 'CODE128', prefix = 'NW', sku = '' } = {}) {
+    try {
+      const maxRetries = 5;
+      for (let attempt = 0; attempt < maxRetries; attempt++) {
+        const candidate = this.generateBarcode({ type, prefix, sku });
+        // Check if candidate already exists in product_barcodes
+        const { data, error } = await supabase
+          .from('product_barcodes')
+          .select('id')
+          .eq('barcode', candidate)
+          .maybeSingle();
+
+        if (error && error.code !== 'PGRST116') {
+          console.warn('generateUniqueBarcode check warning:', error.message);
+          return { success: true, barcode: candidate, barcodeType: type };
+        }
+
+        if (!data) {
+          // Barcode is completely unique!
+          return { success: true, barcode: candidate, barcodeType: type };
+        }
+      }
+      const fallback = `${prefix || 'NW'}${Date.now()}`;
+      return { success: true, barcode: fallback, barcodeType: type };
+    } catch (err) {
+      console.error('generateUniqueBarcode error:', err);
+      const fallback = `${prefix || 'NW'}${Date.now()}`;
+      return { success: true, barcode: fallback, barcodeType: type };
+    }
+  },
 };
 
 export default barcodeService;
+

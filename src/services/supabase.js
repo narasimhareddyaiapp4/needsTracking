@@ -347,7 +347,7 @@ export async function getProductsWithDetails(userId) {
         name,
         variant_options (id, value)
       ),
-      product_variant_combinations (id, combination_string, price, quantity, sku),
+      product_variant_combinations (id, combination_string, price, mrp, quantity, sku),
       product_barcodes (id, barcode, serial_number, packaging_unit, multiplier, product_variant_combination_id)
     `)
     .eq('user_id', userId)
@@ -374,7 +374,7 @@ export async function getActiveProductsWithDetails(userId) {
           name,
           variant_options (id, value)
         ),
-        product_variant_combinations (id, combination_string, price, quantity, sku),
+        product_variant_combinations (id, combination_string, price, mrp, quantity, sku),
         product_barcodes (id, barcode, serial_number, packaging_unit, multiplier, product_variant_combination_id)
       `)
       .eq('is_active', true);
@@ -428,7 +428,7 @@ export async function getTopProductsWithDetails() {
         name,
         variant_options (id, value)
       ),
-      product_variant_combinations (id, combination_string, price, quantity, sku),
+      product_variant_combinations (id, combination_string, price, mrp, quantity, sku),
       product_barcodes (id, barcode, serial_number, packaging_unit, multiplier, product_variant_combination_id)
     `)
     .eq('is_active', true)
@@ -475,10 +475,18 @@ export async function createVariantOption(optionData) {
 }
 
 export async function createProductVariantCombination(combinationData) {
-  const { data, error } = await supabase
+  let { data, error } = await supabase
     .from('product_variant_combinations')
     .insert(combinationData)
     .select();
+
+  if (error && (error.code === 'PGRST204' || (error.message && error.message.includes('mrp')))) {
+    const fallbackData = { ...combinationData };
+    delete fallbackData.mrp;
+    const retry = await supabase.from('product_variant_combinations').insert(fallbackData).select();
+    data = retry.data;
+    error = retry.error;
+  }
 
   if (error) {
     console.error('Error creating product variant combination:', error.message);
@@ -529,9 +537,12 @@ export async function getCart(userId) {
           id,
           combination_string,
           price,
+          mrp,
           products (
             id,
             product_name,
+            amount,
+            mrp,
             customer_id,
             user_id,
             product_media (media_url, media_type)

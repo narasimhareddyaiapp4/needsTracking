@@ -8,13 +8,13 @@ import {
 } from 'react-native';
 import Icon from 'react-native-vector-icons/FontAwesome';
 
-const VariantManager = ({ variants = [], onVariantsChange, product, baseAmount = '', unit = '' }) => {
+const VariantManager = ({ variants = [], onVariantsChange, product, baseAmount = '', baseMrp = '', unit = '' }) => {
   const currentVariants = Array.isArray(variants) ? variants : (product?.product_variants || []);
 
   const handleAddVariant = () => {
     const newVariant = {
       name: '',
-      variant_options: [{ value: '', price: baseAmount || '', quantity: '100' }],
+      variant_options: [{ value: '', price: baseAmount || '', mrp: baseMrp || '', quantity: '100' }],
     };
     onVariantsChange([...currentVariants, newVariant]);
   };
@@ -38,7 +38,7 @@ const VariantManager = ({ variants = [], onVariantsChange, product, baseAmount =
       const opts = variant.variant_options || [];
       return {
         ...variant,
-        variant_options: [...opts, { value: '', price: baseAmount || '', quantity: '100' }],
+        variant_options: [...opts, { value: '', price: baseAmount || '', mrp: baseMrp || '', quantity: '100' }],
       };
     });
     onVariantsChange(updated);
@@ -135,30 +135,61 @@ const VariantManager = ({ variants = [], onVariantsChange, product, baseAmount =
                     </TouchableOpacity>
                   </View>
 
-                  <View style={styles.optionPricingRow}>
-                    <View style={styles.optionPricingField}>
-                      <Text style={styles.optionFieldLabel}>Price (₹)</Text>
-                      <TextInput
-                        style={styles.optionPriceInput}
-                        placeholder={baseAmount ? baseAmount.toString() : "0.00"}
-                        placeholderTextColor="#aaa"
-                        value={option.price !== undefined && option.price !== null ? option.price.toString() : ''}
-                        onChangeText={(text) => handleOptionFieldChange(vIndex, oIndex, 'price', text)}
-                        keyboardType="numeric"
-                      />
-                    </View>
-                    <View style={styles.optionPricingField}>
-                      <Text style={styles.optionFieldLabel}>Stock Qty ({unit || 'units'})</Text>
-                      <TextInput
-                        style={styles.optionPriceInput}
-                        placeholder="100"
-                        placeholderTextColor="#aaa"
-                        value={option.quantity !== undefined && option.quantity !== null ? option.quantity.toString() : ''}
-                        onChangeText={(text) => handleOptionFieldChange(vIndex, oIndex, 'quantity', text)}
-                        keyboardType="numeric"
-                      />
-                    </View>
-                  </View>
+                  {/* Calculate offer details for option */}
+                  {(() => {
+                    const optPrice = parseFloat(option.price) || 0;
+                    const optMrp = parseFloat(option.mrp) || 0;
+                    const hasOptOffer = optMrp > optPrice && optPrice > 0;
+                    const optDiscount = hasOptOffer ? Math.round(((optMrp - optPrice) / optMrp) * 100) : 0;
+                    const optSavings = hasOptOffer ? Math.round((optMrp - optPrice) * 100) / 100 : 0;
+
+                    return (
+                      <>
+                        <View style={styles.optionPricingRow}>
+                          <View style={styles.optionPricingField}>
+                            <Text style={styles.optionFieldLabel}>Price (₹)</Text>
+                            <TextInput
+                              style={styles.optionPriceInput}
+                              placeholder={baseAmount ? baseAmount.toString() : "0.00"}
+                              placeholderTextColor="#aaa"
+                              value={option.price !== undefined && option.price !== null ? option.price.toString() : ''}
+                              onChangeText={(text) => handleOptionFieldChange(vIndex, oIndex, 'price', text)}
+                              keyboardType="numeric"
+                            />
+                          </View>
+                          <View style={styles.optionPricingField}>
+                            <Text style={styles.optionFieldLabel}>MRP (₹)</Text>
+                            <TextInput
+                              style={styles.optionPriceInput}
+                              placeholder={baseMrp ? baseMrp.toString() : "Optional"}
+                              placeholderTextColor="#aaa"
+                              value={option.mrp !== undefined && option.mrp !== null ? option.mrp.toString() : ''}
+                              onChangeText={(text) => handleOptionFieldChange(vIndex, oIndex, 'mrp', text)}
+                              keyboardType="numeric"
+                            />
+                          </View>
+                          <View style={styles.optionPricingField}>
+                            <Text style={styles.optionFieldLabel}>Stock Qty ({unit || 'units'})</Text>
+                            <TextInput
+                              style={styles.optionPriceInput}
+                              placeholder="100"
+                              placeholderTextColor="#aaa"
+                              value={option.quantity !== undefined && option.quantity !== null ? option.quantity.toString() : ''}
+                              onChangeText={(text) => handleOptionFieldChange(vIndex, oIndex, 'quantity', text)}
+                              keyboardType="numeric"
+                            />
+                          </View>
+                        </View>
+                        {hasOptOffer && (
+                          <View style={styles.optionOfferBadgeRow}>
+                            <Text style={styles.optionOfferBadgeText}>
+                              🎁 {optDiscount}% OFF (Save ₹{optSavings.toFixed(2)})
+                            </Text>
+                          </View>
+                        )}
+                      </>
+                    );
+                  })()}
                 </View>
               ))}
 
@@ -377,6 +408,22 @@ const styles = StyleSheet.create({
     color: '#ffffff',
     fontSize: 14,
     fontWeight: '600',
+  },
+  optionOfferBadgeRow: {
+    backgroundColor: '#ecfdf5',
+    borderWidth: 1,
+    borderColor: '#a7f3d0',
+    borderRadius: 4,
+    paddingVertical: 3,
+    paddingHorizontal: 8,
+    alignSelf: 'flex-start',
+    marginTop: 6,
+    marginLeft: 22,
+  },
+  optionOfferBadgeText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#059669',
   },
 });
 
