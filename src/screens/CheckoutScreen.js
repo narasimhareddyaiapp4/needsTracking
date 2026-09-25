@@ -1349,6 +1349,7 @@ const CheckoutScreen = ({ navigation, route }) => {
         const groupSubtotal = sellerGroup.subtotal;
         const groupCgst = isTaxEnabled && groupSubtotal > 0 ? Math.round(groupSubtotal * (cgstRate / 100) * 100) / 100 : 0;
         const groupSgst = isTaxEnabled && groupSubtotal > 0 ? Math.round(groupSubtotal * (sgstRate / 100) * 100) / 100 : 0;
+        const groupService = isServiceCostEnabled && groupSubtotal > 0 && serviceCostRate > 0 ? Math.round(groupSubtotal * (serviceCostRate / 100) * 100) / 100 : 0;
         const groupDeliveryFee = isDineIn ? 0 : deliveryFee;
         const groupPartnerPayout = isDineIn ? 0 : deliveryPartnerPayout;
         const groupTotal = groupSubtotal + groupCgst + groupSgst + groupService + groupDeliveryFee;
