@@ -262,6 +262,33 @@ const ProfileScreen = ({ navigation, route }) => {
     }
   };
 
+  const handleToggleOrderBarcodeScanner = async (val) => {
+    try {
+      setProfile((prev) => ({ ...(prev || {}), enable_order_barcode_scanner: val }));
+      const targetId = profile?.id || currentUser?.id;
+      if (targetId) {
+        try {
+          await supabase.from('profiles').update({ enable_order_barcode_scanner: val }).eq('id', targetId);
+        } catch (dbErr) {
+          console.warn('Could not update enable_order_barcode_scanner in profiles:', dbErr?.message);
+        }
+        try {
+          await supabase.auth.updateUser({
+            data: { enable_order_barcode_scanner: val },
+          });
+        } catch (_) {}
+      }
+      showAlert(
+        'Order Barcode Scanner Updated',
+        val
+          ? 'Camera barcode scanner enabled for your Store Orders! A scan button will appear next to the search bar.'
+          : 'Barcode scanner disabled for Store Orders.'
+      );
+    } catch (err) {
+      console.warn('Error updating enable_order_barcode_scanner:', err);
+    }
+  };
+
   const handleSelectQrCodeSize = async (size) => {
     try {
       const updated = { ...(printerConfig || DEFAULT_PRINTER_CONFIG), qrCodeSize: size };
@@ -541,6 +568,9 @@ const ProfileScreen = ({ navigation, route }) => {
           console.error('Error fetching profile:', error.message);
           showAlert('Error', 'Failed to fetch profile.');
         } else if (data) {
+          if (data.enable_order_barcode_scanner === undefined && user.user_metadata?.enable_order_barcode_scanner !== undefined) {
+            data.enable_order_barcode_scanner = Boolean(user.user_metadata.enable_order_barcode_scanner);
+          }
           setProfile(data);
           setName(data.full_name || user.user_metadata?.full_name || user.user_metadata?.name || '');
           setEmail(data.email || user.email || '');
@@ -1142,6 +1172,9 @@ const ProfileScreen = ({ navigation, route }) => {
         (userRole || 'customer');
 
       updates.role = effectiveRole;
+      if (profile?.enable_order_barcode_scanner !== undefined) {
+        updates.enable_order_barcode_scanner = Boolean(profile.enable_order_barcode_scanner);
+      }
 
       // Try upserting to profiles table
       let { data: updatedData, error: profileError } = await supabase
@@ -1153,6 +1186,7 @@ const ProfileScreen = ({ navigation, route }) => {
       if (profileError && (profileError.code === 'PGRST204' || profileError.message?.includes('column'))) {
         console.warn('Retrying profile upsert without tax, theme, delivery, or upi_id columns:', profileError.message);
         const fallbackUpdates = { ...updates };
+        delete fallbackUpdates.enable_order_barcode_scanner;
         delete fallbackUpdates.enable_tax;
         delete fallbackUpdates.cgst_rate;
         delete fallbackUpdates.sgst_rate;
@@ -3130,6 +3164,24 @@ const ProfileScreen = ({ navigation, route }) => {
               onValueChange={handleTogglePrintOrderBarcode}
               trackColor={{ false: '#CBD5E1', true: '#93C5FD' }}
               thumbColor={printerConfig?.printOrderBarcode !== false ? '#007AFF' : '#F1F5F9'}
+            />
+          </View>
+
+          <View style={styles.printerDivider} />
+
+          {/* Toggle: Enable Camera Barcode Scanner on Store Orders */}
+          <View style={styles.printerToggleRow}>
+            <View style={{ flex: 1, marginRight: 12 }}>
+              <Text style={styles.printerToggleTitle}>Camera Barcode Scanner for Orders</Text>
+              <Text style={styles.printerToggleSub}>
+                Enable camera barcode scanner button on the Store Orders screen to instantly search and locate orders by scanning printed receipt or package barcodes.
+              </Text>
+            </View>
+            <Switch
+              value={Boolean(profile?.enable_order_barcode_scanner)}
+              onValueChange={handleToggleOrderBarcodeScanner}
+              trackColor={{ false: '#CBD5E1', true: '#93C5FD' }}
+              thumbColor={profile?.enable_order_barcode_scanner ? '#007AFF' : '#F1F5F9'}
             />
           </View>
 

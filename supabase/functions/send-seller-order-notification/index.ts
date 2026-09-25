@@ -270,6 +270,253 @@ function buildSellerOrderEmailHtml(params: {
   `;
 }
 
+/**
+ * Builds responsive buyer order receipt & confirmation HTML email
+ */
+function buildBuyerOrderEmailHtml(params: {
+  buyerName: string;
+  sellerName: string;
+  orderNumber: string;
+  orderType: string;
+  customerName: string;
+  customerMobile: string;
+  tableNo?: string;
+  shippingAddress?: string;
+  paymentMethod: string;
+  paymentReference?: string;
+  items: ItemOfferInfo[];
+  subtotal: number;
+  totalOfferSavings: number;
+  cgst: number;
+  sgst: number;
+  serviceCost: number;
+  deliveryFee: number;
+  isFreeDelivery: boolean;
+  totalAmount: number;
+  createdAt: string;
+  appUrl: string;
+}): string {
+  const {
+    buyerName,
+    sellerName,
+    orderNumber,
+    orderType,
+    tableNo,
+    shippingAddress,
+    paymentMethod,
+    paymentReference,
+    items,
+    subtotal,
+    totalOfferSavings,
+    cgst,
+    sgst,
+    serviceCost,
+    deliveryFee,
+    isFreeDelivery,
+    totalAmount,
+    createdAt,
+    appUrl,
+  } = params;
+
+  const hasAnyOffers = totalOfferSavings > 0;
+  const isParcel = orderType === "Parcel" || orderType === "Delivery";
+  const trackingUrl = `${appUrl}?order_id=${orderNumber}`;
+
+  const itemsRowsHtml = items
+    .map((item) => {
+      const priceDisplay = item.hasOffer && item.mrp
+        ? `<div>
+             <span style="text-decoration: line-through; color: #94a3b8; font-size: 12px; margin-right: 4px;">₹${item.mrp.toFixed(2)}</span>
+             <strong style="color: #0f172a; font-size: 14px;">₹${item.price.toFixed(2)}</strong>
+             <span style="background-color: #dcfce7; color: #15803d; font-size: 10px; font-weight: bold; padding: 2px 6px; border-radius: 4px; margin-left: 4px; display: inline-block;">
+               ${item.discountPercentage}% OFF
+             </span>
+             <div style="color: #16a34a; font-size: 11px; margin-top: 2px;">Saved ₹${item.totalSavings.toFixed(2)}</div>
+           </div>`
+        : `<strong style="color: #0f172a; font-size: 14px;">₹${item.price.toFixed(2)}</strong>`;
+
+      return `
+        <tr style="border-bottom: 1px solid #f1f5f9;">
+          <td style="padding: 12px 8px; vertical-align: top;">
+            <div style="font-weight: 600; color: #1e293b; font-size: 14px;">${item.name}</div>
+            ${item.variant && item.variant !== "Default" ? `<div style="color: #64748b; font-size: 12px; margin-top: 2px;">Variant: ${item.variant}</div>` : ""}
+          </td>
+          <td style="padding: 12px 8px; text-align: center; color: #334155; font-size: 14px; font-weight: 600; vertical-align: top;">
+            x${item.quantity}
+          </td>
+          <td style="padding: 12px 8px; text-align: right; vertical-align: top;">
+            ${priceDisplay}
+          </td>
+          <td style="padding: 12px 8px; text-align: right; font-weight: 700; color: #0f172a; font-size: 14px; vertical-align: top;">
+            ₹${item.lineTotal.toFixed(2)}
+          </td>
+        </tr>
+      `;
+    })
+    .join("");
+
+  return `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Order Confirmation #${orderNumber}</title>
+</head>
+<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #f8fafc; margin: 0; padding: 20px 0; color: #1e293b;">
+  <div style="max-width: 600px; margin: 0 auto; background: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05); border: 1px solid #e2e8f0;">
+    
+    <!-- Top Header -->
+    <div style="background: linear-gradient(135deg, #10b981 0%, #059669 100%); padding: 28px 24px; text-align: center; color: #ffffff;">
+      <h1 style="margin: 0 0 6px 0; font-size: 22px; font-weight: 800; letter-spacing: -0.5px;">🛍️ Order Confirmed!</h1>
+      <p style="margin: 0; font-size: 14px; opacity: 0.95;">Hello <strong>${buyerName}</strong>, thank you for your order with <strong>${sellerName}</strong>.</p>
+    </div>
+
+    ${
+      hasAnyOffers
+        ? `
+    <div style="background-color: #f0fdf4; border-bottom: 2px solid #86efac; border-top: 1px solid #bbf7d0; padding: 12px 20px; display: flex; align-items: center;">
+      <div style="font-size: 18px; margin-right: 10px;">🏷️</div>
+      <div>
+        <div style="font-weight: 700; color: #15803d; font-size: 13px; text-transform: uppercase; letter-spacing: 0.5px;">Promotional Savings Applied!</div>
+        <div style="color: #166534; font-size: 13px;">You saved <strong style="color: #047857;">₹${totalOfferSavings.toFixed(2)}</strong> with special store discounts!</div>
+      </div>
+    </div>`
+        : ""
+    }
+
+    <div style="padding: 24px;">
+      <!-- Key Meta Badges -->
+      <table style="width: 100%; margin-bottom: 20px;">
+        <tr>
+          <td>
+            <div style="font-size: 12px; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px;">Order Number</div>
+            <div style="font-size: 18px; font-weight: 800; color: #0f172a;">#${orderNumber}</div>
+            <div style="font-size: 12px; color: #64748b; margin-top: 2px;">${createdAt}</div>
+          </td>
+          <td style="text-align: right;">
+            <span style="background-color: #e0f2fe; color: #0284c7; padding: 4px 10px; border-radius: 9999px; font-size: 12px; font-weight: 700; text-transform: uppercase;">
+              ${orderType === "Dine-in" ? `🍽️ Dine-in (Table ${tableNo || "Counter"})` : "📦 Parcel Delivery"}
+            </span>
+            <div style="margin-top: 6px; font-size: 13px; color: #475569;">
+              Payment: <strong>${paymentMethod.toUpperCase()}</strong>
+              ${paymentReference ? `<span style="color: #64748b; font-size: 11px;">(Ref: ${paymentReference})</span>` : ""}
+            </div>
+          </td>
+        </tr>
+      </table>
+
+      ${
+        isParcel && shippingAddress
+          ? `
+      <div style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 12px 16px; margin-bottom: 20px; font-size: 13px;">
+        <span style="color: #64748b; font-weight: 600;">Delivery Address:</span>
+        <div style="color: #1e293b; margin-top: 2px;">${shippingAddress}</div>
+      </div>`
+          : ""
+      }
+
+      <!-- Items Table -->
+      <div style="margin-bottom: 24px;">
+        <div style="font-size: 14px; font-weight: 700; color: #0f172a; margin-bottom: 12px;">Your Items</div>
+        <table style="width: 100%; border-collapse: collapse;">
+          <thead>
+            <tr style="border-bottom: 2px solid #e2e8f0; font-size: 12px; color: #64748b; text-transform: uppercase;">
+              <th style="padding: 8px 8px 8px 0; text-align: left;">Item</th>
+              <th style="padding: 8px; text-align: center;">Qty</th>
+              <th style="padding: 8px; text-align: right;">Price</th>
+              <th style="padding: 8px 0 8px 8px; text-align: right;">Total</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${itemsRowsHtml}
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Billing Summary -->
+      <div style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 16px; margin-bottom: 24px;">
+        <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
+          <tr>
+            <td style="padding: 4px 0; color: #64748b;">Subtotal:</td>
+            <td style="padding: 4px 0; text-align: right; font-weight: 600; color: #0f172a;">₹${subtotal.toFixed(2)}</td>
+          </tr>
+          ${
+            hasAnyOffers
+              ? `
+          <tr>
+            <td style="padding: 4px 0; color: #15803d; font-weight: 600;">Total Discount Saved:</td>
+            <td style="padding: 4px 0; text-align: right; font-weight: 700; color: #15803d;">-₹${totalOfferSavings.toFixed(2)}</td>
+          </tr>`
+              : ""
+          }
+          ${
+            cgst > 0
+              ? `
+          <tr>
+            <td style="padding: 4px 0; color: #64748b;">CGST:</td>
+            <td style="padding: 4px 0; text-align: right; font-weight: 600; color: #0f172a;">+₹${cgst.toFixed(2)}</td>
+          </tr>`
+              : ""
+          }
+          ${
+            sgst > 0
+              ? `
+          <tr>
+            <td style="padding: 4px 0; color: #64748b;">SGST:</td>
+            <td style="padding: 4px 0; text-align: right; font-weight: 600; color: #0f172a;">+₹${sgst.toFixed(2)}</td>
+          </tr>`
+              : ""
+          }
+          ${
+            serviceCost > 0
+              ? `
+          <tr>
+            <td style="padding: 4px 0; color: #64748b;">Service Charge:</td>
+            <td style="padding: 4px 0; text-align: right; font-weight: 600; color: #0f172a;">+₹${serviceCost.toFixed(2)}</td>
+          </tr>`
+              : ""
+          }
+          ${
+            isParcel
+              ? `
+          <tr>
+            <td style="padding: 4px 0; color: #64748b;">Delivery Fee:</td>
+            <td style="padding: 4px 0; text-align: right; font-weight: 600;">
+              ${
+                isFreeDelivery
+                  ? '<span style="color: #059669; font-weight: 800; background: #dcfce7; padding: 2px 6px; border-radius: 4px; font-size: 11px;">FREE (Promo)</span>'
+                  : `+₹${deliveryFee.toFixed(2)}`
+              }
+            </td>
+          </tr>`
+              : ""
+          }
+          <tr style="border-top: 1px solid #cbd5e1;">
+            <td style="padding: 10px 0 0 0; font-weight: 800; font-size: 15px; color: #0f172a;">Total Paid / Due:</td>
+            <td style="padding: 10px 0 0 0; text-align: right; font-weight: 800; font-size: 18px; color: #059669;">₹${totalAmount.toFixed(2)}</td>
+          </tr>
+        </table>
+      </div>
+
+      <!-- Action Button -->
+      <div style="text-align: center; margin-top: 10px;">
+        <a href="${trackingUrl}" style="background-color: #059669; color: #ffffff; text-decoration: none; padding: 12px 28px; border-radius: 8px; font-weight: 700; font-size: 15px; display: inline-block;">
+          📍 Track Live Order Online
+        </a>
+      </div>
+    </div>
+
+    <!-- Footer -->
+    <div style="background-color: #f1f5f9; padding: 16px 24px; text-align: center; font-size: 12px; color: #64748b; border-top: 1px solid #e2e8f0;">
+      <div>Thank you for choosing <strong>${sellerName}</strong>! Contact store if you need assistance.</div>
+    </div>
+  </div>
+</body>
+</html>
+  `;
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
@@ -448,6 +695,76 @@ serve(async (req) => {
       }
     }
 
+    // 5b. Send Confirmation & Receipt Email to Buyer (Optional for Buyer)
+    let buyerEmail = (order.customer_email || shippingObj?.email || "").trim() || null;
+    if (!buyerEmail && order.user_id) {
+      const { data: buyerProfile } = await supabase
+        .from("profiles")
+        .select("email, full_name")
+        .eq("id", order.user_id)
+        .maybeSingle();
+      buyerEmail = buyerProfile?.email?.trim() || null;
+    }
+
+    if (buyerEmail && buyerEmail.includes("@")) {
+      const buyerSubject = totalOfferSavings > 0
+        ? `🛍️ [Order Confirmed] #${orderNumber} • ₹${totalAmount.toFixed(2)} (Saved ₹${totalOfferSavings.toFixed(2)}!)`
+        : `🛍️ [Order Confirmed] #${orderNumber} • ₹${totalAmount.toFixed(2)}`;
+
+      const buyerEmailHtml = buildBuyerOrderEmailHtml({
+        buyerName: customerName || "Customer",
+        sellerName,
+        orderNumber,
+        orderType: order.order_type || "shop-order",
+        customerName,
+        customerMobile,
+        tableNo: order.table_no,
+        shippingAddress,
+        paymentMethod: order.payment_method || "cod",
+        paymentReference: order.payment_reference,
+        items: parsedItems,
+        subtotal,
+        totalOfferSavings,
+        cgst,
+        sgst,
+        serviceCost,
+        deliveryFee,
+        isFreeDelivery,
+        totalAmount,
+        createdAt: new Date(order.created_at || Date.now()).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" }),
+        appUrl,
+      });
+
+      const resendApiKey = Deno.env.get("RESEND_API_KEY");
+      if (resendApiKey) {
+        try {
+          const resendBuyerRes = await fetch("https://api.resend.com/emails", {
+            method: "POST",
+            headers: {
+              "Authorization": `Bearer ${resendApiKey}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              from: Deno.env.get("EMAIL_FROM") || "Orders <orders@resend.dev>",
+              to: [buyerEmail],
+              subject: buyerSubject,
+              html: buyerEmailHtml,
+            }),
+          });
+          notificationResults.buyerEmail = await resendBuyerRes.json();
+          console.log(`[send-seller-order-notification] Buyer confirmation email sent to ${buyerEmail}`);
+        } catch (buyerMailErr: any) {
+          console.error("Resend buyer email error:", buyerMailErr);
+          notificationResults.buyerEmail = { error: buyerMailErr?.message };
+        }
+      } else {
+        notificationResults.buyerEmail = { notice: "Template ready. RESEND_API_KEY required in Supabase secrets." };
+      }
+    } else {
+      console.log(`[send-seller-order-notification] No buyer email provided (optional for buyer). Skipping buyer confirmation email.`);
+      notificationResults.buyerEmail = { skipped: true, reason: "No buyer email provided (optional for buyer)" };
+    }
+
     // 6. Send Web Browser & Mobile Push Notification to Seller
     const { data: sellerTokens } = await supabase
       .from("push_tokens")
@@ -495,6 +812,7 @@ serve(async (req) => {
         orderId: order.id,
         sellerId,
         sellerEmail,
+        buyerEmail,
         hasOffers: totalOfferSavings > 0,
         totalOfferSavings,
         notificationResults,

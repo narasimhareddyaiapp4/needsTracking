@@ -1432,6 +1432,18 @@ export async function updateOrderStatus(orderId, newStatus) {
     console.error('Error updating order status:', error.message);
     return null;
   }
+
+  // Trigger buyer status notification (Email & Push) via edge function
+  try {
+    supabase.functions.invoke('notify-order-update', {
+      body: { orderId, newStatus },
+    }).then((res) => {
+      console.log('[updateOrderStatus] Notification dispatched for status update:', res?.data);
+    }).catch((fnErr) => {
+      console.warn('[updateOrderStatus] Notification invoke notice:', fnErr);
+    });
+  } catch (_) {}
+
   return data ? data[0] : null;
 }
 

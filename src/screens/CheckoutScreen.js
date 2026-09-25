@@ -68,6 +68,7 @@ const CheckoutScreen = ({ navigation, route }) => {
   const [isProcessingPos, setIsProcessingPos] = useState(false);
   const [posCustomerName, setPosCustomerName] = useState('');
   const [posCustomerMobile, setPosCustomerMobile] = useState('');
+  const [posCustomerEmail, setPosCustomerEmail] = useState('');
   const [posTableNo, setPosTableNo] = useState('Main counter');
   const [showPosSuccessModal, setShowPosSuccessModal] = useState(false);
   const [posSuccessData, setPosSuccessData] = useState(null);
@@ -84,6 +85,7 @@ const CheckoutScreen = ({ navigation, route }) => {
   const [qrViewerIndex, setQrViewerIndex] = useState(0);
   const [name, setName] = useState('');
   const [mobile, setMobile] = useState('');
+  const [buyerEmail, setBuyerEmail] = useState('');
   const [address, setAddress] = useState('');
   const [city, setCity] = useState('');
   const [postalCode, setPostalCode] = useState('');
@@ -179,6 +181,9 @@ const CheckoutScreen = ({ navigation, route }) => {
 
       if (user) {
         setName((prev) => prev || user.user_metadata?.full_name || user.user_metadata?.name || '');
+        if (user.email) {
+          setBuyerEmail((prev) => prev || user.email);
+        }
         const { data: profileData } = await supabase
           .from('profiles')
           .select('*')
@@ -203,6 +208,9 @@ const CheckoutScreen = ({ navigation, route }) => {
 
         if (profileData) {
           setProfile(profileData);
+          if (profileData.email) {
+            setBuyerEmail((prev) => prev || profileData.email);
+          }
           if (profileData.mobile) {
             setMobile((prev) => prev || profileData.mobile);
             setIsMobileVerified(true);
@@ -326,6 +334,7 @@ const CheckoutScreen = ({ navigation, route }) => {
     name: '',
     mobile: '',
     phone: '',
+    email: '',
     address: '',
     city: '',
     postalCode: '',
@@ -339,6 +348,7 @@ const CheckoutScreen = ({ navigation, route }) => {
       name,
       mobile: (mobile || '').trim(),
       phone: (mobile || '').trim(),
+      email: (buyerEmail || '').trim(),
       address,
       city,
       postalCode,
@@ -346,7 +356,7 @@ const CheckoutScreen = ({ navigation, route }) => {
       latitude: selectedCoords?.latitude || null,
       longitude: selectedCoords?.longitude || null,
     });
-  }, [name, mobile, address, city, postalCode, country, selectedCoords]);
+  }, [name, mobile, buyerEmail, address, city, postalCode, country, selectedCoords]);
 
   const cartItems = cart?.cart_items || [];
   const subtotal = cartItems.reduce(
@@ -1368,23 +1378,39 @@ const CheckoutScreen = ({ navigation, route }) => {
           total: groupTotal,
         };
 
+        const resolvedBuyerEmail = (
+          buyerEmail ||
+          currentUser?.email ||
+          profile?.email ||
+          (typeof shippingAddress === 'object' ? shippingAddress?.email : '') ||
+          ''
+        ).trim();
+
+        const dateCode = new Date().toISOString().slice(2, 10).replace(/-/g, '');
+        const randomOrderSuffix = Math.floor(1000 + Math.random() * 9000);
+        const orderBarcode = `ORD-${dateCode}-${randomOrderSuffix}`;
+
         const shippingWithBilling = isDineIn
           ? {
               type: 'Dine-in',
               table_no: tableNo || 'Main counter',
               name: name.trim() || 'Guest Diner',
               mobile: cleanMobile || (profile?.mobile || ''),
+              email: resolvedBuyerEmail,
               address: `Dine-in (${tableNo || 'Main counter'})`,
               city: city || '',
               postalCode: postalCode || '',
               billing: billingBreakdown,
+              barcode: orderBarcode,
               payment_reference: uniquePaymentCode,
               payment_note: orderNote,
               payment_status: 'pending',
             }
           : {
               ...(typeof shippingAddress === 'object' ? shippingAddress : { address: shippingAddress }),
+              email: resolvedBuyerEmail,
               billing: billingBreakdown,
+              barcode: orderBarcode,
               payment_reference: uniquePaymentCode,
               payment_note: orderNote,
               payment_status: 'pending',
@@ -1406,6 +1432,7 @@ const CheckoutScreen = ({ navigation, route }) => {
           delivery_partner_payout: groupPartnerPayout,
           status: orderStatus,
           payment_method: activeMethod,
+          barcode: orderBarcode,
           payment_reference: uniquePaymentCode,
           payment_status: 'pending',
           order_type: 'shop-order', // Dine-in and parcel shop orders go directly to seller
@@ -1679,6 +1706,7 @@ const CheckoutScreen = ({ navigation, route }) => {
     const printOnFinish = Boolean(options.printReceipt);
     const customerDisplayName = (options.customerName || name || '').trim() || 'Counter Customer';
     const customerMobile = (options.customerMobile || mobile || '').trim().replace(/[\s\-()]/g, '');
+    const customerEmail = (options.customerEmail || buyerEmail || '').trim();
     const activeTable = options.tableNo || tableNo || 'Main counter';
 
     if (cartItems.length === 0) {
@@ -1754,15 +1782,21 @@ const CheckoutScreen = ({ navigation, route }) => {
           ? `${activeEmployee?.name || 'Staff'} (${activeEmployee?.designation || 'Cashier'})`
           : (profile?.full_name || 'Store Owner');
 
+        const dateCode = new Date().toISOString().slice(2, 10).replace(/-/g, '');
+        const randomOrderSuffix = Math.floor(1000 + Math.random() * 9000);
+        const orderBarcode = `ORD-${dateCode}-${randomOrderSuffix}`;
+
         const shippingWithBilling = {
           type: 'Dine-in',
           table_no: activeTable,
           name: customerDisplayName,
           mobile: customerMobile || (profile?.mobile || ''),
+          email: customerEmail,
           address: `POS Counter Bill (${activeTable})`,
           city: city || profile?.city || '',
           postalCode: postalCode || profile?.zip_code || '',
           billing: billingBreakdown,
+          barcode: orderBarcode,
           payment_reference: uniquePaymentCode,
           payment_note: orderNote,
           payment_status: 'paid',
@@ -1784,6 +1818,7 @@ const CheckoutScreen = ({ navigation, route }) => {
           service_cost_rate: serviceCostRate,
           status: chosenStatus,
           payment_method: chosenMethod,
+          barcode: orderBarcode,
           payment_reference: uniquePaymentCode,
           payment_status: chosenPayStatus,
           order_type: 'shop-order',
@@ -2410,6 +2445,18 @@ const CheckoutScreen = ({ navigation, route }) => {
                 value={name}
                 onChangeText={setName}
               />
+
+              <Text style={[styles.formFieldLabel, { marginTop: 10 }]}>Customer Email (Optional — for bill & receipts):</Text>
+              <TextInput
+                style={styles.input}
+                placeholder="guest@example.com (Optional)"
+                placeholderTextColor="#94a3b8"
+                value={buyerEmail}
+                onChangeText={setBuyerEmail}
+                keyboardType="email-address"
+                autoCapitalize="none"
+                autoCorrect={false}
+              />
             </View>
           ) : (
             <View style={styles.parcelNoticeBox}>
@@ -2601,6 +2648,18 @@ const CheckoutScreen = ({ navigation, route }) => {
                   />
                 </View>
               </View>
+
+              <Text style={styles.formFieldLabel}>Email Address (Optional — for order updates & tracking)</Text>
+              <TextInput
+                style={styles.input}
+                placeholder="e.g. yourname@example.com (Optional)"
+                placeholderTextColor="#94a3b8"
+                value={buyerEmail}
+                onChangeText={setBuyerEmail}
+                keyboardType="email-address"
+                autoCapitalize="none"
+                autoCorrect={false}
+              />
 
               {selectedCoords && (
                 <View style={styles.activeCoordsRow}>
@@ -3396,6 +3455,19 @@ const CheckoutScreen = ({ navigation, route }) => {
                 maxLength={10}
               />
 
+              {/* Customer Email (Optional) */}
+              <Text style={styles.posModalInputLabel}>Customer Email (Optional):</Text>
+              <TextInput
+                style={styles.posModalInput}
+                placeholder="customer@example.com (Optional)"
+                placeholderTextColor="#94A3B8"
+                value={posCustomerEmail}
+                onChangeText={setPosCustomerEmail}
+                keyboardType="email-address"
+                autoCapitalize="none"
+                autoCorrect={false}
+              />
+
               {/* Print Receipt Toggle */}
               <TouchableOpacity
                 style={styles.posPrintToggleRow}
@@ -3448,6 +3520,7 @@ const CheckoutScreen = ({ navigation, route }) => {
                     printReceipt: posPrintReceipt,
                     customerName: posCustomerName,
                     customerMobile: posCustomerMobile,
+                    customerEmail: posCustomerEmail,
                     tableNo: posTableNo,
                   });
                 }}

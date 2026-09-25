@@ -833,6 +833,11 @@ const OrderDetailScreen = ({ navigation, route }) => {
           <View style={styles.orderMetaTopRow}>
             <View style={{ flex: 1 }}>
               <Text style={styles.orderNumberLarge}>Order No: {orderNumber}</Text>
+              {Boolean(order?.barcode || shipping?.barcode) && (
+                <Text style={{ fontSize: 13, color: '#475569', marginTop: 2 }}>
+                  Barcode: <Text style={{ fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace', fontWeight: 'bold', color: '#0F172A' }}>{order?.barcode || shipping?.barcode}</Text>
+                </Text>
+              )}
               {dayOrderNo ? (
                 <Text style={styles.dayOrderHighlight}>Day Order No: #{dayOrderNo}</Text>
               ) : null}

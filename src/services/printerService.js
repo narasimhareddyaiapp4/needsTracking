@@ -488,7 +488,8 @@ export const generateEscPosBytes = (data, config = DEFAULT_PRINTER_CONFIG) => {
 
     // Optional 1D Code-128 Order Barcode for instant mobile camera / scanner tracking
     if (config.printOrderBarcode !== false) {
-      const cleanBcCode = orderNoStr.replace(/[^A-Za-z0-9_-]/g, '').trim();
+      const rawBarcode = data.barcode || orderNoStr;
+      const cleanBcCode = String(rawBarcode).replace(/[^A-Za-z0-9_-]/g, '').trim();
       if (cleanBcCode.length > 0 && cleanBcCode.length <= 32) {
         try {
           addBytes(CMD_ALIGN_CENTER);
@@ -905,9 +906,10 @@ export const generateReceiptHtml = (data, config = DEFAULT_PRINTER_CONFIG) => {
           ` : ''}
 
           <div class="meta-row"><span>Order No:</span><span class="bold">${data.orderId || data.rawOrderId || 'N/A'}</span></div>
-          ${config.printOrderBarcode !== false && (data.orderId || data.rawOrderId) ? `
+          ${config.printOrderBarcode !== false && (data.barcode || data.orderId || data.rawOrderId) ? `
           <div class="barcode-container">
-            ${generateCode128Svg(String(data.orderId || data.rawOrderId), { height: is80mm ? 44 : 36, barWidth: is80mm ? 1.5 : 1.25 })}
+            ${generateCode128Svg(String(data.barcode || data.orderId || data.rawOrderId), { height: is80mm ? 44 : 36, barWidth: is80mm ? 1.5 : 1.25 })}
+            <div style="font-size: 10px; font-weight: 600; letter-spacing: 1px; margin-top: 2px;">${String(data.barcode || data.orderId || data.rawOrderId)}</div>
           </div>
           ` : ''}
           ${shouldPrintDayWise ? `<div class="meta-row"><span>Day Order No:</span><span class="bold">#${String(dayOrder).replace(/^#/,'')}</span></div>` : ''}
@@ -1508,6 +1510,7 @@ export const printReceipt = async (orderDetails, options = {}) => {
       title: options.title || 'TAX INVOICE / ORDER RECEIPT',
       orderId: orderNumber,
       rawOrderId: orderId,
+      barcode: order.barcode || shippingObj?.barcode || orderNumber || orderId,
       dayOrderNo: resolvedDayOrderNo || null,
       dailyOrderNumber: resolvedDayOrderNo || null,
       dayWiseOrderNo: resolvedDayOrderNo || null,

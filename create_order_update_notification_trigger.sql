@@ -17,7 +17,7 @@ BEGIN
   -- You can find your service_role key in your Supabase project settings under API.
   -- It is recommended to store this key in a secure way, for example, using Supabase secrets.
   PERFORM net.http_post(
-    url:='https://qdljcbvesouchefzxsag.supabase.co/functions/v1/notify-order-update',
+    url:='https://cikxysaxvbixrcwlgzds.supabase.co/functions/v1/notify-order-update',
     headers:='{"Content-Type": "application/json", "Authorization": "Bearer YOUR_SERVICE_ROLE_KEY"}'::jsonb,
     body:=jsonb_build_object(
       'type', 'ORDER_STATUS_UPDATE',

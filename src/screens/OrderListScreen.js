@@ -20,6 +20,7 @@ import { printReceipt, extractOrderNumbers, announceOrderPrint } from '../servic
 import { getGuestOrderIds } from '../services/localStorageService';
 import { getActiveEmployeeSession } from '../services/employeeService';
 import Icon from 'react-native-vector-icons/FontAwesome';
+import BarcodeScannerModal from '../components/BarcodeScannerModal';
 import UniversalDateTimePicker from '../components/UniversalDateTimePicker';
 import { showAlert } from '../utils/alertUtils';
 import { downloadQrCodeImage } from '../utils/qrDownloadUtils';
@@ -52,6 +53,8 @@ const OrderListScreen = ({ navigation, route }) => {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
+  const [isBarcodeScannerEnabled, setIsBarcodeScannerEnabled] = useState(false);
+  const [showBarcodeScanner, setShowBarcodeScanner] = useState(false);
 
   const [selectedQrOrder, setSelectedQrOrder] = useState(null);
   const [modalSellerUpiId, setModalSellerUpiId] = useState('');
@@ -223,6 +226,33 @@ const OrderListScreen = ({ navigation, route }) => {
 
   const canManageOrders = userRole === 'seller' || userRole === 'admin' || userRole === 'superadmin' || (isEmployee && permissions.can_manage_orders !== false);
 
+  const checkBarcodeScannerSetting = useCallback(async (currUser = currentUser) => {
+    try {
+      const storeId = effectiveSellerId || sellerId || currUser?.id;
+      if (!storeId) {
+        setIsBarcodeScannerEnabled(false);
+        return;
+      }
+
+      const { data: storeProf, error } = await supabase
+        .from('profiles')
+        .select('enable_order_barcode_scanner')
+        .eq('id', storeId)
+        .maybeSingle();
+
+      if (!error && storeProf && storeProf.enable_order_barcode_scanner !== undefined) {
+        setIsBarcodeScannerEnabled(Boolean(storeProf.enable_order_barcode_scanner));
+        return;
+      }
+
+      if (currUser?.id === storeId && currUser?.user_metadata?.enable_order_barcode_scanner !== undefined) {
+        setIsBarcodeScannerEnabled(Boolean(currUser.user_metadata.enable_order_barcode_scanner));
+      }
+    } catch (err) {
+      console.warn('Error checking store barcode scanner preference:', err);
+    }
+  }, [effectiveSellerId, sellerId, currentUser]);
+
   const fetchOrders = useCallback(async (isSilent = false) => {
     // Only show full loading spinner on initial cold fetch when no orders are loaded yet
     if (!isSilent && orders.length === 0) {
@@ -343,6 +373,7 @@ const OrderListScreen = ({ navigation, route }) => {
   useFocusEffect(
     useCallback(() => {
       fetchOrders(orders.length > 0);
+      checkBarcodeScannerSetting();
 
       // Auto-reload orders every 15 seconds in the background
       const intervalId = setInterval(() => {
@@ -352,7 +383,7 @@ const OrderListScreen = ({ navigation, route }) => {
       return () => {
         clearInterval(intervalId);
       };
-    }, [fetchOrders, orders.length])
+    }, [fetchOrders, checkBarcodeScannerSetting, orders.length])
   );
 
   // Realtime Supabase live update listener on orders table
@@ -392,13 +423,15 @@ const OrderListScreen = ({ navigation, route }) => {
       filtered = filtered.filter(order => {
         const { orderNumber, dayOrderNo, paymentReference } = extractOrderNumbers(order);
         const query = searchQuery.toLowerCase().trim();
+        const barcodeVal = String(order.barcode || order.shipping_address?.barcode || '').toLowerCase().trim();
         return (
           (orderNumber && orderNumber.toLowerCase().includes(query)) ||
           (dayOrderNo && dayOrderNo.toLowerCase().includes(query)) ||
           (paymentReference && paymentReference.toLowerCase().includes(query)) ||
           (order.id && order.id.toLowerCase().includes(query)) ||
           (order.customer_name && order.customer_name.toLowerCase().includes(query)) ||
-          (order.table_no && order.table_no.toLowerCase().includes(query))
+          (order.table_no && order.table_no.toLowerCase().includes(query)) ||
+          (barcodeVal && (barcodeVal.includes(query) || query.includes(barcodeVal)))
         );
       });
     }
@@ -885,13 +918,38 @@ const OrderListScreen = ({ navigation, route }) => {
           ) : (
             <>
               <View style={styles.searchContainer}>
-            <TextInput
-              style={styles.searchInput}
-              placeholder="Search by Order No, 6-digit Pay Code..."
-              placeholderTextColor="#94a3b8"
-              value={searchQuery}
-              onChangeText={setSearchQuery}
-            />
+                <View style={styles.searchInputRow}>
+                  <View style={styles.searchInputWrapper}>
+                    <Icon name="search" size={14} color="#94A3B8" style={styles.searchIconLeading} />
+                    <TextInput
+                      style={styles.searchInput}
+                      placeholder={isBarcodeScannerEnabled ? "Search Order No, Barcode, Pay Code..." : "Search by Order No, 6-digit Pay Code..."}
+                      placeholderTextColor="#94a3b8"
+                      value={searchQuery}
+                      onChangeText={setSearchQuery}
+                    />
+                    {Boolean(searchQuery) && (
+                      <TouchableOpacity
+                        style={styles.clearSearchBtn}
+                        onPress={() => setSearchQuery('')}
+                        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                      >
+                        <Icon name="times-circle" size={16} color="#94A3B8" />
+                      </TouchableOpacity>
+                    )}
+                  </View>
+                  {isBarcodeScannerEnabled && canManageOrders && (
+                    <TouchableOpacity
+                      style={styles.barcodeScanBtn}
+                      onPress={() => setShowBarcodeScanner(true)}
+                      activeOpacity={0.8}
+                      accessibilityLabel="Scan receipt barcode"
+                    >
+                      <Icon name="barcode" size={16} color="#FFFFFF" style={{ marginRight: 6 }} />
+                      <Text style={styles.barcodeScanBtnText}>Scan</Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
             <View style={styles.statusFilterContainer}>
               {[
                 { id: null, label: 'All' },
@@ -1215,6 +1273,23 @@ const OrderListScreen = ({ navigation, route }) => {
         </View>
       </Modal>
 
+      {/* Mobile Camera Barcode Scanner for Store Orders */}
+      {isBarcodeScannerEnabled && (
+        <BarcodeScannerModal
+          visible={showBarcodeScanner}
+          onClose={() => setShowBarcodeScanner(false)}
+          onScan={(scannedCode) => {
+            if (!scannedCode) return;
+            const clean = String(scannedCode).trim();
+            setShowBarcodeScanner(false);
+            setSearchQuery(clean);
+          }}
+          title="Scan Order Barcode"
+          subtitle="Point camera at receipt barcode or package code to find order"
+          defaultContinuous={false}
+        />
+      )}
+
       {/* Bottom Navigation Footer (Store, Cart, Orders) */}
       <StoreNavigationFooter
         activeTab="orders"
@@ -1268,16 +1343,49 @@ const styles = StyleSheet.create({
     borderBottomColor: '#E2E8F0',
     flexShrink: 0,
   },
-  searchInput: {
+  searchInputRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  searchInputWrapper: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
     backgroundColor: '#F1F5F9',
-    paddingHorizontal: 14,
-    paddingVertical: 10,
     borderRadius: 8,
     borderWidth: 1,
     borderColor: '#E2E8F0',
-    marginBottom: 10,
+    paddingHorizontal: 10,
+  },
+  searchIconLeading: {
+    marginRight: 6,
+  },
+  searchInput: {
+    flex: 1,
+    paddingVertical: 10,
     fontSize: 14,
     color: '#0F172A',
+    minHeight: 40,
+  },
+  clearSearchBtn: {
+    padding: 4,
+    marginLeft: 4,
+  },
+  barcodeScanBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#007AFF',
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    marginLeft: 8,
+    height: 42,
+  },
+  barcodeScanBtnText: {
+    color: '#FFFFFF',
+    fontWeight: '700',
+    fontSize: 13,
   },
   statusFilterContainer: {
     flexDirection: 'row',
