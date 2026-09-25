@@ -458,6 +458,9 @@ function AppInner() {
           if (order.user_id === session.user.id) {
             title = '🎉 Order Placed Successfully!';
             body = `Your order #${orderNum}${amountStr} is confirmed.`;
+          } else if (order.seller_id === session.user.id) {
+            title = '🛒 New Customer Order Received!';
+            body = `Order #${orderNum}${amountStr} received for your store. Tap to view details.`;
           } else if (order.order_type !== 'shop-order') {
             title = '🛵 New Delivery Order!';
             body = `Order #${orderNum}${amountStr} is ready for delivery.`;

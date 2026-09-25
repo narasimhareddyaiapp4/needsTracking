@@ -1526,6 +1526,17 @@ const CheckoutScreen = ({ navigation, route }) => {
           }
         }
 
+        // Trigger seller email & push notification with offer template
+        try {
+          supabase.functions.invoke('send-seller-order-notification', {
+            body: { orderId: order.id },
+          }).then((res) => {
+            console.log('[Checkout] Seller notification dispatched:', res?.data);
+          }).catch((fnErr) => {
+            console.warn('[Checkout] Seller notification invoke notice:', fnErr);
+          });
+        } catch (_) {}
+
         // Send local confirmation notification
         try {
           const notificationTitle = isDineIn
