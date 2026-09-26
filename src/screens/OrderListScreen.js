@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -55,6 +55,19 @@ const OrderListScreen = ({ navigation, route }) => {
   const [isSyncing, setIsSyncing] = useState(false);
   const [isBarcodeScannerEnabled, setIsBarcodeScannerEnabled] = useState(false);
   const [showBarcodeScanner, setShowBarcodeScanner] = useState(false);
+
+  // Synchronized refs to prevent infinite re-render / fetch loops
+  const ordersRef = useRef(orders);
+  ordersRef.current = orders;
+
+  const currentUserRef = useRef(currentUser);
+  currentUserRef.current = currentUser;
+
+  const userRoleRef = useRef(userRole);
+  userRoleRef.current = userRole;
+
+  const isFetchingRef = useRef(false);
+  const fetchOrdersRef = useRef(null);
 
   const [selectedQrOrder, setSelectedQrOrder] = useState(null);
   const [modalSellerUpiId, setModalSellerUpiId] = useState('');
@@ -221,14 +234,16 @@ const OrderListScreen = ({ navigation, route }) => {
   useEffect(() => {
     if (contextRole) {
       setUserRole(contextRole);
+      userRoleRef.current = contextRole;
     }
   }, [contextRole]);
 
   const canManageOrders = userRole === 'seller' || userRole === 'admin' || userRole === 'superadmin' || (isEmployee && permissions.can_manage_orders !== false);
 
-  const checkBarcodeScannerSetting = useCallback(async (currUser = currentUser) => {
+  const checkBarcodeScannerSetting = useCallback(async (currUser) => {
     try {
-      const storeId = effectiveSellerId || sellerId || currUser?.id;
+      const activeUser = currUser || currentUserRef.current;
+      const storeId = effectiveSellerId || sellerId || (canManageOrders ? activeUser?.id : null);
       if (!storeId) {
         setIsBarcodeScannerEnabled(false);
         return;
@@ -245,17 +260,21 @@ const OrderListScreen = ({ navigation, route }) => {
         return;
       }
 
-      if (currUser?.id === storeId && currUser?.user_metadata?.enable_order_barcode_scanner !== undefined) {
-        setIsBarcodeScannerEnabled(Boolean(currUser.user_metadata.enable_order_barcode_scanner));
+      if (activeUser?.id === storeId && activeUser?.user_metadata?.enable_order_barcode_scanner !== undefined) {
+        setIsBarcodeScannerEnabled(Boolean(activeUser.user_metadata.enable_order_barcode_scanner));
       }
     } catch (err) {
       console.warn('Error checking store barcode scanner preference:', err);
     }
-  }, [effectiveSellerId, sellerId, currentUser]);
+  }, [effectiveSellerId, sellerId, canManageOrders]);
 
   const fetchOrders = useCallback(async (isSilent = false) => {
+    // Avoid concurrent duplicate requests
+    if (isFetchingRef.current) return;
+    isFetchingRef.current = true;
+
     // Only show full loading spinner on initial cold fetch when no orders are loaded yet
-    if (!isSilent && orders.length === 0) {
+    if (!isSilent && ordersRef.current.length === 0) {
       setLoading(true);
     } else if (isSilent) {
       setIsSyncing(true);
@@ -272,7 +291,10 @@ const OrderListScreen = ({ navigation, route }) => {
         user = authUser;
       }
 
-      setCurrentUser(user || null);
+      if (user?.id !== currentUserRef.current?.id) {
+        setCurrentUser(user || null);
+        currentUserRef.current = user || null;
+      }
 
       let fetchedOrders = [];
 
@@ -318,15 +340,18 @@ const OrderListScreen = ({ navigation, route }) => {
         }
       } else {
         // Authenticated user
-        let effectiveRole = isEmployee ? 'seller_employee' : (contextRole || userRole);
+        let effectiveRole = isEmployee ? 'seller_employee' : (contextRole || userRoleRef.current);
         if (!effectiveRole) {
           const { data: prof } = await supabase
             .from('profiles')
             .select('role')
             .eq('id', user.id)
             .maybeSingle();
-          effectiveRole = prof?.role || 'buyer';
-          setUserRole(effectiveRole);
+          effectiveRole = prof?.role || user.user_metadata?.role || (route?.params?.role === 'seller' ? 'seller' : 'buyer');
+          if (userRoleRef.current !== effectiveRole) {
+            setUserRole(effectiveRole);
+            userRoleRef.current = effectiveRole;
+          }
         }
 
         const isSeller = effectiveRole === 'seller';
@@ -350,29 +375,71 @@ const OrderListScreen = ({ navigation, route }) => {
         } else {
           // Buyer views strictly their own orders (never seller's store orders)
           fetchedOrders = await getOrders(user.id, { role: 'buyer', isSeller: false });
+
+          // Also check for any guest orders stored locally on this device and merge
+          try {
+            const guestIds = await getGuestOrderIds();
+            if (guestIds && guestIds.length > 0) {
+              const existingIds = new Set((fetchedOrders || []).map((o) => o.id));
+              const missingGuestIds = guestIds.filter((id) => !existingIds.has(id));
+              if (missingGuestIds.length > 0) {
+                const selectQuery = `
+                  *,
+                  order_items (
+                    id,
+                    quantity,
+                    price,
+                    product_variant_combination_id,
+                    product_variant_combinations (
+                      id,
+                      combination_string,
+                      price,
+                      products (
+                        id,
+                        product_name,
+                        user_id,
+                        customer_id,
+                        product_media (media_url, media_type)
+                      )
+                    )
+                  )
+                `;
+                const { data: extraGuestOrders, error: guestErr } = await supabase
+                  .from('orders')
+                  .select(selectQuery)
+                  .in('id', missingGuestIds);
+                if (!guestErr && Array.isArray(extraGuestOrders) && extraGuestOrders.length > 0) {
+                  fetchedOrders = [...(fetchedOrders || []), ...extraGuestOrders].sort(
+                    (a, b) => new Date(b.created_at) - new Date(a.created_at)
+                  );
+                }
+              }
+            }
+          } catch (_) {}
         }
       }
 
       if (fetchedOrders && Array.isArray(fetchedOrders)) {
         setOrders(fetchedOrders);
-      } else {
-        setOrders([]);
       }
     } catch (err) {
       console.warn('Error in fetchOrders:', err);
-      if (orders.length === 0) {
+      if (ordersRef.current.length === 0) {
         setOrders([]);
       }
     } finally {
+      isFetchingRef.current = false;
       setLoading(false);
       setIsSyncing(false);
     }
-  }, [contextRole, userRole, route?.params, orders.length]);
+  }, [contextRole, isEmployee, effectiveSellerId, route?.params?.sellerId, route?.params?.role]);
+
+  fetchOrdersRef.current = fetchOrders;
 
   // Immediately load fresh orders on screen focus & start auto-reload interval
   useFocusEffect(
     useCallback(() => {
-      fetchOrders(orders.length > 0);
+      fetchOrders(ordersRef.current.length > 0);
       checkBarcodeScannerSetting();
 
       // Auto-reload orders every 15 seconds in the background
@@ -383,7 +450,7 @@ const OrderListScreen = ({ navigation, route }) => {
       return () => {
         clearInterval(intervalId);
       };
-    }, [fetchOrders, checkBarcodeScannerSetting, orders.length])
+    }, [fetchOrders, checkBarcodeScannerSetting])
   );
 
   // Realtime Supabase live update listener on orders table
@@ -395,17 +462,21 @@ const OrderListScreen = ({ navigation, route }) => {
         { event: '*', schema: 'public', table: 'orders' },
         (payload) => {
           console.log('[OrderListScreen] Realtime order event received:', payload.eventType);
-          fetchOrders(true);
+          fetchOrdersRef.current?.(true);
         }
       )
       .subscribe();
 
     const { data: authListener } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (session?.user) {
-        setCurrentUser(session.user);
-        fetchOrders(true);
+        if (currentUserRef.current?.id !== session.user.id) {
+          setCurrentUser(session.user);
+          currentUserRef.current = session.user;
+        }
+        fetchOrdersRef.current?.(true);
       } else {
         setCurrentUser(null);
+        currentUserRef.current = null;
         setOrders([]);
       }
     });
@@ -414,7 +485,7 @@ const OrderListScreen = ({ navigation, route }) => {
       supabase.removeChannel(ordersChannel);
       authListener?.subscription?.unsubscribe?.();
     };
-  }, [fetchOrders]);
+  }, []);
 
   useEffect(() => {
     let filtered = orders;
@@ -423,7 +494,16 @@ const OrderListScreen = ({ navigation, route }) => {
       filtered = filtered.filter(order => {
         const { orderNumber, dayOrderNo, paymentReference } = extractOrderNumbers(order);
         const query = searchQuery.toLowerCase().trim();
-        const barcodeVal = String(order.barcode || order.shipping_address?.barcode || '').toLowerCase().trim();
+        let shippingBarcode = '';
+        if (typeof order.shipping_address === 'object') {
+          shippingBarcode = order.shipping_address?.barcode || '';
+        } else if (typeof order.shipping_address === 'string' && order.shipping_address.includes('barcode')) {
+          try {
+            const parsed = JSON.parse(order.shipping_address);
+            shippingBarcode = parsed?.barcode || '';
+          } catch (_) {}
+        }
+        const barcodeVal = String(order.barcode || shippingBarcode || '').toLowerCase().trim();
         return (
           (orderNumber && orderNumber.toLowerCase().includes(query)) ||
           (dayOrderNo && dayOrderNo.toLowerCase().includes(query)) ||
@@ -487,7 +567,7 @@ const OrderListScreen = ({ navigation, route }) => {
 
   useEffect(() => {
     const total = sectionedOrders.reduce((sum, section) => {
-      return sum + section.data.reduce((sectionSum, order) => sectionSum + order.total_amount, 0);
+      return sum + section.data.reduce((sectionSum, order) => sectionSum + Number(order.total_amount || 0), 0);
     }, 0);
     setTotalAmount(total);
   }, [sectionedOrders]);
@@ -775,7 +855,7 @@ const OrderListScreen = ({ navigation, route }) => {
     );
   }
 
-  const isGuest = !currentUser && orders.length === 0;
+  const isGuest = !loading && !currentUser && orders.length === 0;
 
   return (
     <View

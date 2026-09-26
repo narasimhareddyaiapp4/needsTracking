@@ -1310,7 +1310,7 @@ export async function getOrders(userId, options = {}) {
 
     if (buyerErr) {
       console.error('getOrders: Error fetching buyer orders:', buyerErr.message);
-      return null;
+      return [];
     }
     orders = buyerData || [];
   }
