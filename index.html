@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en" class="notranslate" translate="no">
+  <head>
+    <meta charset="utf-8" />
+    <meta httpEquiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no, viewport-fit=cover" />
+    <meta name="google" content="notranslate" />
+    <script>
+      (function() {
+        if (typeof Node === 'function' && Node.prototype) {
+          var origRemove = Node.prototype.removeChild;
+          Node.prototype.removeChild = function(child) {
+            if (!child || child.parentNode !== this) {
+              if (typeof console !== 'undefined' && console.warn) {
+                console.warn('Cannot removeChild: not a child of this node. Safely bypassed.', child, this);
+              }
+              return child;
+            }
+            return origRemove.apply(this, arguments);
+          };
+          var origInsert = Node.prototype.insertBefore;
+          Node.prototype.insertBefore = function(newNode, refNode) {
+            if (refNode && refNode.parentNode !== this) {
+              if (typeof console !== 'undefined' && console.warn) {
+                console.warn('Cannot insertBefore: refNode is not a child of this node. Appending instead.', newNode, refNode, this);
+              }
+              return this.appendChild(newNode);
+            }
+            return origInsert.apply(this, arguments);
+          };
+        }
+      })();
+    </script>
+    <title>Needs Tracker</title>
+
+    <!-- PWA & Mobile Web Meta Tags -->
+    <link rel="manifest" href="./manifest.json" />
+    <meta name="theme-color" content="#007AFF" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="Needs Tracker" />
+    <link rel="apple-touch-icon" href="./icon-192.png" />
+    <link rel="icon" type="image/png" href="./icon-192.png" />
+
+    <!-- The `react-native-web` recommended style reset -->
+    <style id="expo-reset">
+      /* These styles make the body full-height and full-width */
+      html,
+      body {
+        height: 100%;
+        width: 100%;
+        margin: 0;
+        padding: 0;
+      }
+      /* These styles disable body scrolling if you are using <ScrollView> */
+      body {
+        overflow: hidden;
+      }
+      /* These styles make the root element full-height and full-width */
+      #root {
+        display: flex;
+        height: 100%;
+        width: 100%;
+        flex: 1;
+      }
+    </style>
+
+    <!-- Cache-control meta tags to prevent stale HTML caching -->
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+    <meta http-equiv="Pragma" content="no-cache" />
+    <meta http-equiv="Expires" content="0" />
+
+    <!-- Security: Automatically upgrade any insecure http:// requests to https:// -->
+    <meta http-equiv="Content-Security-Policy" content="upgrade-insecure-requests" />
+
+    <!-- PWA Service Worker Registration with Auto-Reload on New Version -->
+    <script>
+      if ('serviceWorker' in navigator) {
+        var isReloading = false;
+        navigator.serviceWorker.addEventListener('controllerchange', function() {
+  if (!isReloading) {
+    isReloading = true;
+    console.log('[PWA] New service worker active.');
+  }
+});
+
+        window.addEventListener('load', function() {
+          var swUrl = './sw.js?v=7';
+          navigator.serviceWorker.register(swUrl)
+            .then(function(reg) {
+              console.log('[PWA] Service Worker registered with scope:', reg.scope);
+              reg.update();
+            })
+            .catch(function(err) {
+              console.warn('[PWA] Service Worker registration notice:', err);
+            });
+        });
+      }
+    </script>
+  <meta name="theme-color" content="#007AFF">
+<meta name="description" content="Real-time delivery tracking, orders, and local marketplace">
+</head>
+
+  <body>
+    <!-- Use static rendering with Expo Router to support running without JavaScript. -->
+    <noscript>
+      You need to enable JavaScript to run this app.
+    </noscript>
+    <!-- The root element for your Expo app. -->
+    <div id="root"></div>
+  <script src="/needsTracking/_expo/static/js/web/AppEntry-2e4683e883f234746ec746f1ff526b7a.js" defer></script>
+</body>
+</html>

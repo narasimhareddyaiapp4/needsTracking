@@ -1,0 +1,38 @@
+{
+  "short_name": "NeedsTracker",
+  "name": "Needs Tracker",
+  "description": "Real-time delivery tracking, orders, and local marketplace",
+  "icons": [
+    {
+      "src": "icon-192.png",
+      "type": "image/png",
+      "sizes": "192x192",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "icon-512.png",
+      "type": "image/png",
+      "sizes": "512x512",
+      "purpose": "any maskable"
+    }
+  ],
+  "start_url": "./",
+  "scope": "./",
+  "background_color": "#ffffff",
+  "theme_color": "#007AFF",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "categories": ["shopping", "business", "food", "lifestyle"],
+  "shortcuts": [
+    {
+      "name": "My Orders",
+      "url": "./#orders",
+      "description": "View placed orders and live tracking"
+    },
+    {
+      "name": "Catalog",
+      "url": "./#catalog",
+      "description": "Browse store products"
+    }
+  ]
+}
