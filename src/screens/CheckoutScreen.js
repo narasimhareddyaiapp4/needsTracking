@@ -1386,9 +1386,10 @@ const CheckoutScreen = ({ navigation, route }) => {
           ''
         ).trim();
 
-        const dateCode = new Date().toISOString().slice(2, 10).replace(/-/g, '');
+        const dateCode = new Date().toISOString().slice(2, 10).replace(/[^0-9]/g, '');
         const randomOrderSuffix = Math.floor(1000 + Math.random() * 9000);
-        const orderBarcode = `ORD-${dateCode}-${randomOrderSuffix}`;
+        // Pure alphanumeric code - zero special characters for universal barcode scanner compatibility
+        const orderBarcode = `ORD${dateCode}${randomOrderSuffix}`;
 
         const shippingWithBilling = isDineIn
           ? {
@@ -1782,9 +1783,10 @@ const CheckoutScreen = ({ navigation, route }) => {
           ? `${activeEmployee?.name || 'Staff'} (${activeEmployee?.designation || 'Cashier'})`
           : (profile?.full_name || 'Store Owner');
 
-        const dateCode = new Date().toISOString().slice(2, 10).replace(/-/g, '');
+        const dateCode = new Date().toISOString().slice(2, 10).replace(/[^0-9]/g, '');
         const randomOrderSuffix = Math.floor(1000 + Math.random() * 9000);
-        const orderBarcode = `ORD-${dateCode}-${randomOrderSuffix}`;
+        // Pure alphanumeric code - zero special characters for universal barcode scanner compatibility
+        const orderBarcode = `ORD${dateCode}${randomOrderSuffix}`;
 
         const shippingWithBilling = {
           type: 'Dine-in',
@@ -1904,6 +1906,19 @@ const CheckoutScreen = ({ navigation, route }) => {
         createdOrders.push(order);
         if (!orderUserId && order?.id) {
           saveGuestOrderId(order.id);
+        }
+
+        // Trigger seller email & push notification for POS order
+        if (order?.id) {
+          try {
+            supabase.functions.invoke('send-seller-order-notification', {
+              body: { orderId: order.id },
+            }).then((res) => {
+              console.log('[Checkout POS] Notification dispatched:', res?.data);
+            }).catch((fnErr) => {
+              console.warn('[Checkout POS] Notification invoke notice:', fnErr);
+            });
+          } catch (_) {}
         }
       }
 

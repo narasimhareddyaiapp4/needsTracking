@@ -9,6 +9,7 @@ import {
 } from 'react-native';
 import Icon from 'react-native-vector-icons/FontAwesome';
 import SellerSalesReport from '../components/SellerSalesReport';
+import SellerPnLReport from '../components/SellerPnLReport';
 import StoreNavigationFooter from '../components/StoreNavigationFooter';
 import { supabase } from '../services/supabase';
 import { useCart } from '../context/CartContext';
@@ -17,6 +18,7 @@ const SellerSalesReportScreen = ({ navigation, route }) => {
   const { role: contextRole } = useCart();
   const [currentUser, setCurrentUser] = useState(null);
   const [userRole, setUserRole] = useState(contextRole || null);
+  const [reportTab, setReportTab] = useState(route?.params?.initialTab || 'pnl'); // 'pnl' | 'sales'
 
   const routeSellerId = route?.params?.sellerId;
   const routeSellerName = route?.params?.sellerName;
@@ -63,20 +65,51 @@ const SellerSalesReportScreen = ({ navigation, route }) => {
         )}
 
         <View style={{ flex: 1 }}>
-          <Text style={styles.headerTitle}>Sales & Hourly Analytics</Text>
-          <Text style={styles.headerSubtitle}>
-            {routeSellerName ? routeSellerName : 'Seller Business Dashboard'}
+          <Text style={styles.headerTitle}>
+            {reportTab === 'pnl' ? '💰 Profit & Loss / Expenses' : '📊 Sales & Hourly Analytics'}
           </Text>
+          <Text style={styles.headerSubtitle}>
+            {routeSellerName ? routeSellerName : 'Store Financials & Performance'}
+          </Text>
+        </View>
+
+        {/* Top Report Mode Switcher */}
+        <View style={styles.reportSwitchGroup}>
+          <TouchableOpacity
+            style={[styles.reportSwitchBtn, reportTab === 'pnl' && styles.reportSwitchBtnActive]}
+            onPress={() => setReportTab('pnl')}
+          >
+            <Text style={[styles.reportSwitchText, reportTab === 'pnl' && styles.reportSwitchTextActive]}>
+              P&L / Expenses
+            </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.reportSwitchBtn, reportTab === 'sales' && styles.reportSwitchBtnActive]}
+            onPress={() => setReportTab('sales')}
+          >
+            <Text style={[styles.reportSwitchText, reportTab === 'sales' && styles.reportSwitchTextActive]}>
+              Sales
+            </Text>
+          </TouchableOpacity>
         </View>
       </View>
 
       {/* Main Report Body */}
       <View style={{ flex: 1 }}>
-        <SellerSalesReport
-          sellerId={effectiveSellerId}
-          sellerName={routeSellerName}
-          onClose={canGoBack ? () => navigation.goBack() : undefined}
-        />
+        {reportTab === 'pnl' ? (
+          <SellerPnLReport
+            sellerId={effectiveSellerId}
+            sellerName={routeSellerName}
+            onClose={canGoBack ? () => navigation.goBack() : undefined}
+          />
+        ) : (
+          <SellerSalesReport
+            sellerId={effectiveSellerId}
+            sellerName={routeSellerName}
+            onClose={canGoBack ? () => navigation.goBack() : undefined}
+          />
+        )}
       </View>
 
       {/* Footer Navigation (only shows when outside Tab navigator) */}
@@ -123,6 +156,29 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: '#64748B',
     marginTop: 1,
+  },
+  reportSwitchGroup: {
+    flexDirection: 'row',
+    backgroundColor: '#F1F5F9',
+    borderRadius: 8,
+    padding: 3,
+    marginLeft: 10,
+  },
+  reportSwitchBtn: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 6,
+  },
+  reportSwitchBtnActive: {
+    backgroundColor: '#0F172A',
+  },
+  reportSwitchText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#64748B',
+  },
+  reportSwitchTextActive: {
+    color: '#FFFFFF',
   },
 });
 

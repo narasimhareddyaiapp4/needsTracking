@@ -835,7 +835,7 @@ const OrderDetailScreen = ({ navigation, route }) => {
               <Text style={styles.orderNumberLarge}>Order No: {orderNumber}</Text>
               {Boolean(order?.barcode || shipping?.barcode) && (
                 <Text style={{ fontSize: 13, color: '#475569', marginTop: 2 }}>
-                  Barcode: <Text style={{ fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace', fontWeight: 'bold', color: '#0F172A' }}>{order?.barcode || shipping?.barcode}</Text>
+                  Barcode: <Text style={{ fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace', fontWeight: 'bold', color: '#0F172A' }}>{String(order?.barcode || shipping?.barcode).replace(/[^A-Za-z0-9]/g, '')}</Text>
                 </Text>
               )}
               {dayOrderNo ? (

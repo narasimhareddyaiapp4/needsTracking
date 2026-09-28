@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { SMTPClient } from "https://deno.land/x/denomailer@1.6.0/mod.ts";
 export const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
@@ -517,6 +518,104 @@ function buildBuyerOrderEmailHtml(params: {
   `;
 }
 
+/**
+ * Dispatches transactional email via direct SMTP or Resend fallback
+ */
+async function sendTransactionalEmail(options: {
+  to: string | string[];
+  subject: string;
+  html: string;
+}): Promise<{ sent: boolean; method: string; recipients: string[]; response?: any; error?: string }> {
+  const rawList = Array.isArray(options.to) ? options.to : [options.to];
+  const validRecipients = Array.from(
+    new Set(
+      rawList
+        .map((e) => (typeof e === "string" ? e.trim().toLowerCase() : ""))
+        .filter((e) => e && e.includes("@"))
+    )
+  );
+
+  if (validRecipients.length === 0) {
+    return { sent: false, method: "none", recipients: [], error: "No valid recipient email address provided." };
+  }
+
+  const smtpHost = Deno.env.get("SMTP_HOST");
+  const smtpUser = Deno.env.get("SMTP_USER");
+  const smtpPass = Deno.env.get("SMTP_PASS");
+  const smtpPort = Number(Deno.env.get("SMTP_PORT") || 465);
+  const resendApiKey = Deno.env.get("RESEND_API_KEY");
+  const senderName = Deno.env.get("SMTP_SENDER_NAME") || "Orders";
+  const fromAddress = Deno.env.get("EMAIL_FROM") || 
+    (smtpUser ? `${senderName} <${smtpUser}>` : `${senderName} <orders@resend.dev>`);
+
+  // 1. Try Custom SMTP first
+  if (smtpHost && smtpUser && smtpPass) {
+    try {
+      const client = new SMTPClient({
+        connection: {
+          hostname: smtpHost,
+          port: smtpPort,
+          tls: smtpPort === 465,
+          auth: {
+            username: smtpUser,
+            password: smtpPass,
+          },
+        },
+      });
+
+      await client.send({
+        from: fromAddress,
+        to: validRecipients,
+        subject: options.subject,
+        html: options.html,
+      });
+      await client.close();
+
+      console.log(`[send-seller-order-notification] Email sent via SMTP (${smtpHost}:${smtpPort}) to: ${validRecipients.join(", ")}`);
+      return { sent: true, method: "smtp", recipients: validRecipients };
+    } catch (smtpErr: any) {
+      console.error(`[send-seller-order-notification] SMTP error:`, smtpErr);
+      if (!resendApiKey) {
+        return { sent: false, method: "smtp", recipients: validRecipients, error: smtpErr?.message || String(smtpErr) };
+      }
+      console.log(`[send-seller-order-notification] Falling back to Resend API after SMTP failure...`);
+    }
+  }
+
+  // 2. Try Resend if configured
+  if (resendApiKey) {
+    try {
+      const resendRes = await fetch("https://api.resend.com/emails", {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${resendApiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          from: fromAddress,
+          to: validRecipients,
+          subject: options.subject,
+          html: options.html,
+        }),
+      });
+      const data = await resendRes.json();
+      console.log(`[send-seller-order-notification] Email sent via Resend to ${validRecipients.join(", ")}`);
+      return { sent: true, method: "resend", recipients: validRecipients, response: data };
+    } catch (resendErr: any) {
+      console.error("[send-seller-order-notification] Resend error:", resendErr);
+      return { sent: false, method: "resend", recipients: validRecipients, error: resendErr?.message || String(resendErr) };
+    }
+  }
+
+  console.warn(`[send-seller-order-notification] Neither SMTP nor Resend configured. Target: ${validRecipients.join(", ")}`);
+  return {
+    sent: false,
+    method: "none",
+    recipients: validRecipients,
+    error: "No email service configured. Please set SMTP_HOST, SMTP_USER, SMTP_PASS (and optionally SMTP_PORT, EMAIL_FROM) in Supabase secrets.",
+  };
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
@@ -570,6 +669,47 @@ serve(async (req) => {
       throw new Error(`Failed to load order ${targetOrderId}: ${orderErr?.message}`);
     }
 
+    // Deduplication check: if email was already marked sent on this order
+    if (order.email_sent === true) {
+      console.log(`[send-seller-order-notification] Order ${targetOrderId} already marked as email_sent.`);
+      return new Response(
+        JSON.stringify({
+          success: true,
+          message: "Email already sent for this order.",
+          orderId: targetOrderId,
+        }),
+        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    // If order_items are empty (e.g. database trigger ran before order_items insert completed), wait 1.5s and reload
+    if (!order.order_items || order.order_items.length === 0) {
+      await new Promise((r) => setTimeout(r, 1500));
+      const { data: refreshedItems } = await supabase
+        .from("order_items")
+        .select(`
+          id,
+          quantity,
+          price,
+          product_variant_combinations (
+            id,
+            combination_string,
+            price,
+            mrp,
+            products (
+              id,
+              product_name,
+              mrp,
+              user_id
+            )
+          )
+        `)
+        .eq("order_id", targetOrderId);
+      if (refreshedItems && refreshedItems.length > 0) {
+        order.order_items = refreshedItems;
+      }
+    }
+
     // 2. Identify the seller
     const sellerId = order.seller_id || order.order_items?.[0]?.product_variant_combinations?.products?.user_id;
 
@@ -587,8 +727,26 @@ serve(async (req) => {
       .eq("id", sellerId)
       .maybeSingle();
 
-    const sellerEmail = sellerProfile?.email || null;
+    const sellerEmail = sellerProfile?.email?.trim() || null;
     const sellerName = sellerProfile?.full_name || "Store Owner";
+
+    // 3b. Fetch Staff with Order Management Permissions (can_manage_orders)
+    const { data: employees } = await supabase
+      .from("seller_employees")
+      .select("id, name, email, permissions, is_active")
+      .eq("seller_id", sellerId)
+      .eq("is_active", true);
+
+    const orderStaffEmails = (employees || [])
+      .filter((emp: any) => emp.permissions?.can_manage_orders === true && emp.email && emp.email.includes("@"))
+      .map((emp: any) => emp.email.trim().toLowerCase());
+
+    const sellerRecipients = Array.from(
+      new Set([
+        ...(sellerEmail && sellerEmail.includes("@") ? [sellerEmail.toLowerCase()] : []),
+        ...orderStaffEmails,
+      ])
+    );
 
     // 4. Calculate Offers & Line Items breakdown
     const parsedItems: ItemOfferInfo[] = (order.order_items || []).map((oi: any) => {
@@ -635,10 +793,10 @@ serve(async (req) => {
     const customerMobile = order.customer_mobile || shippingObj?.mobile || "";
     const shippingAddress = typeof order.shipping_address === "string" ? order.shipping_address : shippingObj?.address || "";
 
-    const notificationResults: { email?: unknown; push?: unknown } = {};
+    const notificationResults: { email?: unknown; buyerEmail?: unknown; push?: unknown } = {};
 
-    // 5. Send Transactional Email to Seller via Resend or SMTP
-    if (sellerEmail) {
+    // 5. Send Transactional Email to Seller & Staff via SMTP or Resend
+    if (sellerRecipients.length > 0) {
       const emailSubject = totalOfferSavings > 0
         ? `🔥 [New Offer Order] #${orderNumber} • ₹${totalAmount.toFixed(2)} (Buyer saved ₹${totalOfferSavings.toFixed(2)})`
         : `📦 [New Order] #${orderNumber} • ₹${totalAmount.toFixed(2)} received`;
@@ -666,33 +824,13 @@ serve(async (req) => {
         appUrl,
       });
 
-      // Try Resend API first (default recommended in Supabase)
-      const resendApiKey = Deno.env.get("RESEND_API_KEY");
-      if (resendApiKey) {
-        try {
-          const resendRes = await fetch("https://api.resend.com/emails", {
-            method: "POST",
-            headers: {
-              "Authorization": `Bearer ${resendApiKey}`,
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({
-              from: Deno.env.get("EMAIL_FROM") || "Orders <orders@resend.dev>",
-              to: [sellerEmail],
-              subject: emailSubject,
-              html: emailHtml,
-            }),
-          });
-          notificationResults.email = await resendRes.json();
-          console.log(`[send-seller-order-notification] Email sent via Resend to ${sellerEmail}`);
-        } catch (resendErr: any) {
-          console.error("Resend error:", resendErr);
-          notificationResults.email = { error: resendErr?.message };
-        }
-      } else {
-        console.log(`[send-seller-order-notification] Note: RESEND_API_KEY not configured. Template generated for ${sellerEmail}.`);
-        notificationResults.email = { notice: "Email template ready. Set RESEND_API_KEY in Supabase secrets to dispatch automatically." };
-      }
+      notificationResults.email = await sendTransactionalEmail({
+        to: sellerRecipients,
+        subject: emailSubject,
+        html: emailHtml,
+      });
+    } else {
+      notificationResults.email = { sent: false, reason: "No seller or staff email found." };
     }
 
     // 5b. Send Confirmation & Receipt Email to Buyer (Optional for Buyer)
@@ -735,34 +873,27 @@ serve(async (req) => {
         appUrl,
       });
 
-      const resendApiKey = Deno.env.get("RESEND_API_KEY");
-      if (resendApiKey) {
-        try {
-          const resendBuyerRes = await fetch("https://api.resend.com/emails", {
-            method: "POST",
-            headers: {
-              "Authorization": `Bearer ${resendApiKey}`,
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({
-              from: Deno.env.get("EMAIL_FROM") || "Orders <orders@resend.dev>",
-              to: [buyerEmail],
-              subject: buyerSubject,
-              html: buyerEmailHtml,
-            }),
-          });
-          notificationResults.buyerEmail = await resendBuyerRes.json();
-          console.log(`[send-seller-order-notification] Buyer confirmation email sent to ${buyerEmail}`);
-        } catch (buyerMailErr: any) {
-          console.error("Resend buyer email error:", buyerMailErr);
-          notificationResults.buyerEmail = { error: buyerMailErr?.message };
-        }
-      } else {
-        notificationResults.buyerEmail = { notice: "Template ready. RESEND_API_KEY required in Supabase secrets." };
-      }
+      notificationResults.buyerEmail = await sendTransactionalEmail({
+        to: buyerEmail,
+        subject: buyerSubject,
+        html: buyerEmailHtml,
+      });
     } else {
-      console.log(`[send-seller-order-notification] No buyer email provided (optional for buyer). Skipping buyer confirmation email.`);
+      console.log(`[send-seller-order-notification] No buyer email provided. Skipping buyer confirmation email.`);
       notificationResults.buyerEmail = { skipped: true, reason: "No buyer email provided (optional for buyer)" };
+    }
+
+    // Mark email as sent in orders table to prevent duplicate dispatches
+    try {
+      await supabase
+        .from("orders")
+        .update({
+          email_sent: true,
+          email_sent_at: new Date().toISOString(),
+        })
+        .eq("id", targetOrderId);
+    } catch (_) {
+      // Non-fatal if column doesn't exist yet
     }
 
     // 6. Send Web Browser & Mobile Push Notification to Seller
@@ -811,7 +942,7 @@ serve(async (req) => {
         success: true,
         orderId: order.id,
         sellerId,
-        sellerEmail,
+        sellerRecipients,
         buyerEmail,
         hasOffers: totalOfferSavings > 0,
         totalOfferSavings,

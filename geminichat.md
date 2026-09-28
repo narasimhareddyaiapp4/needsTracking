@@ -191,3 +191,18 @@
   3. **Verified Build**:
      - Executed full production web export (`npx expo export -p web`) with zero errors, updating `dist/` bundle assets.
 
+## 2026-09-28 20:38:00 UTC
+- **User Request**: "ok I will check, one issue like if seller activate the print order barcode (code-128) at profile also not shown the barcode at print receipt or unable to view order in order list, dont take any special chars in order no moght be this is issue"
+- **Summary**:
+  1. **Fixed Code-128 Barcode on ESC/POS Thermal & HTML Print Receipts**:
+     - **ESC/POS Subset Code (`{B`)**: ESC/POS command `GS k 73 len data` requires Code 128 subset selection characters `{B` (`0x7B, 0x42`) as the first two bytes of data. Without `{B`, thermal receipt printers reject the command and omit the barcode. Added `{B` prefix and adjusted payload length.
+     - **Removed All Special Characters from Barcode**: Enforced strict alphanumeric filtering (`replace(/[^A-Za-z0-9]/g, '')`) for order barcodes across [printerService.js](file:///workspaces/needsTracking/src/services/printerService.js) and [CheckoutScreen.js](file:///workspaces/needsTracking/src/screens/CheckoutScreen.js) (`ORD${dateCode}${randomOrderSuffix}`), completely eliminating hyphens, `#`, and special characters so barcodes scan flawlessly on all handheld laser scanners and phone cameras.
+     - **Receipt Width Auto-Fit & SVG Cleanup**: Added adaptive module bar-width scaling in `generateCode128Svg` to fit comfortably on 58mm (~200px) and 80mm paper widths without clipping, fixed symbol weight index in checksum calculation, and eliminated duplicate text below the barcode.
+  2. **Synced Seller Barcode Settings Across Devices & Cloud**:
+     - Added `print_order_barcode` column to [enable_order_barcode_and_seller_config.sql](file:///workspaces/needsTracking/enable_order_barcode_and_seller_config.sql).
+     - In [ProfileScreen.js](file:///workspaces/needsTracking/src/screens/ProfileScreen.js), updated `handleTogglePrintOrderBarcode` to persist `print_order_barcode` to `profiles` table, sync to `user_metadata.tax_settings`, and reload on startup.
+     - In `printReceipt`, loaded seller profile's `print_order_barcode` setting from Supabase to respect seller preferences across all devices and POS registers.
+  3. **Fixed "Unable to View Order in Order List" & Barcode Scanner Lookup**:
+     - In [OrderListScreen.js](file:///workspaces/needsTracking/src/screens/OrderListScreen.js), updated the search/filter to perform dual matching: raw text matching AND clean alphanumeric matching (stripping `#`, `-`, `/`, and whitespace).
+     - When a seller scans a barcode from a receipt or types `#1`, `#0001`, `202609280001`, or `ORD1234`, the filter now normalizes the query and successfully matches the order regardless of hyphens or prefixes.
+     - Displayed clean barcode string directly on each order card in [OrderListScreen.js](file:///workspaces/needsTracking/src/screens/OrderListScreen.js) and [OrderDetailScreen.js](file:///workspaces/needsTracking/src/screens/OrderDetailScreen.js).

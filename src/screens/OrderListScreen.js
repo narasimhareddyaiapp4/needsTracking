@@ -26,6 +26,7 @@ import { showAlert } from '../utils/alertUtils';
 import { downloadQrCodeImage } from '../utils/qrDownloadUtils';
 import StoreNavigationFooter from '../components/StoreNavigationFooter';
 import SellerSalesReport from '../components/SellerSalesReport';
+import SellerPnLReport from '../components/SellerPnLReport';
 import { useCart } from '../context/CartContext';
 import {
   generateQrDataUrl,
@@ -40,7 +41,13 @@ import {
 const OrderListScreen = ({ navigation, route }) => {
   const { sellerId, sellerName, customerId } = route?.params || {};
   const { role: contextRole } = useCart();
-  const [activeMainTab, setActiveMainTab] = useState(route?.params?.initialTab === 'report' ? 'report' : 'orders');
+  const [activeMainTab, setActiveMainTab] = useState(
+    route?.params?.initialTab === 'pnl'
+      ? 'pnl'
+      : route?.params?.initialTab === 'report'
+      ? 'report'
+      : 'orders'
+  );
   const [orders, setOrders] = useState([]);
   const [currentUser, setCurrentUser] = useState(null);
   const [userRole, setUserRole] = useState(contextRole || null);
@@ -76,6 +83,134 @@ const OrderListScreen = ({ navigation, route }) => {
   const [loadingModalQr, setLoadingModalQr] = useState(false);
   const [isDownloadingModalQr, setIsDownloadingModalQr] = useState(false);
   const [copiedModalUpi, setCopiedModalUpi] = useState(false);
+
+  // Quick Direct Sale (Counter / Direct UPI) State
+  const [quickSaleModalVisible, setQuickSaleModalVisible] = useState(false);
+  const [quickSaleAmount, setQuickSaleAmount] = useState('');
+  const [quickSaleMethod, setQuickSaleMethod] = useState('upi'); // 'upi' | 'cash' | 'card'
+  const [quickSaleUpiRef, setQuickSaleUpiRef] = useState('');
+  const [quickSaleNote, setQuickSaleNote] = useState('');
+  const [quickSaleCustomerMobile, setQuickSaleCustomerMobile] = useState('');
+  const [quickSaleType, setQuickSaleType] = useState('takeaway'); // 'takeaway' | 'dine_in'
+  const [isRecordingQuickSale, setIsRecordingQuickSale] = useState(false);
+
+  const openQuickSaleModal = useCallback(() => {
+    setQuickSaleAmount('');
+    setQuickSaleMethod('upi');
+    setQuickSaleUpiRef('');
+    setQuickSaleNote('');
+    setQuickSaleCustomerMobile('');
+    setQuickSaleType('takeaway');
+    setQuickSaleModalVisible(true);
+  }, []);
+
+  const handleQuickAddAmount = (addValue) => {
+    setQuickSaleAmount((prev) => {
+      const current = Number(prev) || 0;
+      return String(current + addValue);
+    });
+  };
+
+  const handleRecordQuickSale = async () => {
+    const parsedAmt = Number(quickSaleAmount);
+    if (isNaN(parsedAmt) || parsedAmt <= 0) {
+      showAlert('Invalid Amount', 'Please enter a valid sale amount greater than 0.');
+      return;
+    }
+
+    setIsRecordingQuickSale(true);
+    try {
+      const activeUser = currentUserRef.current;
+      const targetStoreId = effectiveSellerId || sellerId || activeUser?.id;
+      if (!targetStoreId) {
+        throw new Error('Unable to identify store. Please ensure you are logged in as a seller or staff.');
+      }
+
+      const generatedPayCode = `POS-${Math.floor(100000 + Math.random() * 900000)}`;
+      const paymentRef = quickSaleUpiRef?.trim()
+        ? quickSaleUpiRef.trim()
+        : quickSaleMethod === 'upi'
+        ? `UPI-${Math.floor(100000 + Math.random() * 900000)}`
+        : generatedPayCode;
+
+      const orderUserId = activeUser?.id || targetStoreId;
+      const billedBy = isEmployee ? (employeeSession?.name || 'Staff') : 'Store Owner';
+      const saleDescription = quickSaleNote?.trim()
+        ? quickSaleNote.trim()
+        : quickSaleMethod === 'upi'
+        ? 'Direct Counter UPI Sale'
+        : 'Direct Counter Cash Sale';
+
+      const orderPayload = {
+        user_id: orderUserId,
+        seller_id: targetStoreId,
+        total_amount: parsedAmt,
+        status: 'delivered',
+        payment_method: quickSaleMethod,
+        payment_status: 'paid',
+        payment_reference: paymentRef,
+        order_type: 'pos',
+        table_no: quickSaleType === 'dine_in' ? 'Table' : 'Counter',
+        shipping_address: {
+          name: 'Counter Customer',
+          mobile: quickSaleCustomerMobile?.trim() || '',
+          address: 'In-store Direct Sale',
+          notes: saleDescription,
+          billed_by: billedBy,
+          is_quick_sale: true,
+        },
+      };
+
+      let res = await supabase.from('orders').insert(orderPayload).select().single();
+      let order = res.data;
+      let orderError = res.error;
+
+      if (orderError && (orderError.code === 'PGRST204' || (orderError.message && orderError.message.includes('column')))) {
+        const fallback = {
+          user_id: orderUserId,
+          seller_id: targetStoreId,
+          total_amount: parsedAmt,
+          status: 'delivered',
+          payment_method: quickSaleMethod,
+          payment_reference: paymentRef,
+          order_type: 'shop-order',
+          table_no: 'Counter',
+          shipping_address: {
+            name: 'Counter Customer',
+            mobile: quickSaleCustomerMobile?.trim() || '',
+            address: 'In-store Direct Sale',
+            notes: saleDescription,
+          },
+        };
+        if (orderError.message && orderError.message.includes('payment_reference')) {
+          delete fallback.payment_reference;
+        }
+        const retry = await supabase.from('orders').insert(fallback).select().single();
+        order = retry.data;
+        orderError = retry.error;
+      }
+
+      if (orderError) {
+        console.error('Error inserting quick sale:', orderError);
+        throw orderError;
+      }
+
+      setQuickSaleModalVisible(false);
+      showAlert(
+        'Sale Recorded! 🎉',
+        `₹${parsedAmt.toFixed(2)} recorded via ${quickSaleMethod.toUpperCase()}.\nOrder Ref: #${paymentRef}`
+      );
+
+      if (fetchOrdersRef.current) {
+        fetchOrdersRef.current(true);
+      }
+    } catch (err) {
+      console.error('Record quick sale error:', err);
+      showAlert('Error', err.message || 'Failed to record direct sale.');
+    } finally {
+      setIsRecordingQuickSale(false);
+    }
+  };
 
   const handleOpenOrderQrModal = async (targetOrder) => {
     setSelectedQrOrder(targetOrder);
@@ -491,9 +626,11 @@ const OrderListScreen = ({ navigation, route }) => {
     let filtered = orders;
 
     if (searchQuery) {
+      const query = searchQuery.toLowerCase().trim();
+      const cleanQuery = query.replace(/[^a-z0-9]/gi, '').toLowerCase();
+
       filtered = filtered.filter(order => {
-        const { orderNumber, dayOrderNo, paymentReference } = extractOrderNumbers(order);
-        const query = searchQuery.toLowerCase().trim();
+        const { orderNumber, rawOrderNumber, dayOrderNo, paymentReference, barcode } = extractOrderNumbers(order);
         let shippingBarcode = '';
         if (typeof order.shipping_address === 'object') {
           shippingBarcode = order.shipping_address?.barcode || '';
@@ -503,16 +640,48 @@ const OrderListScreen = ({ navigation, route }) => {
             shippingBarcode = parsed?.barcode || '';
           } catch (_) {}
         }
-        const barcodeVal = String(order.barcode || shippingBarcode || '').toLowerCase().trim();
-        return (
-          (orderNumber && orderNumber.toLowerCase().includes(query)) ||
-          (dayOrderNo && dayOrderNo.toLowerCase().includes(query)) ||
-          (paymentReference && paymentReference.toLowerCase().includes(query)) ||
-          (order.id && order.id.toLowerCase().includes(query)) ||
-          (order.customer_name && order.customer_name.toLowerCase().includes(query)) ||
-          (order.table_no && order.table_no.toLowerCase().includes(query)) ||
-          (barcodeVal && (barcodeVal.includes(query) || query.includes(barcodeVal)))
-        );
+        const barcodeVal = String(order.barcode || barcode || shippingBarcode || '').toLowerCase().trim();
+
+        // 1. Raw exact/contains matching
+        const rawOrderNum = String(rawOrderNumber || orderNumber || '').toLowerCase();
+        const rawDayOrderNo = String(dayOrderNo || '').toLowerCase();
+        const rawId = String(order.id || '').toLowerCase();
+        const rawPayRef = String(paymentReference || '').toLowerCase();
+        const customerName = String(order.customer_name || '').toLowerCase();
+        const tableNo = String(order.table_no || '').toLowerCase();
+
+        const matchRaw =
+          (rawOrderNum && rawOrderNum.includes(query)) ||
+          (rawDayOrderNo && rawDayOrderNo.includes(query)) ||
+          (rawPayRef && rawPayRef.includes(query)) ||
+          (rawId && rawId.includes(query)) ||
+          (customerName && customerName.includes(query)) ||
+          (tableNo && tableNo.includes(query)) ||
+          (barcodeVal && (barcodeVal.includes(query) || query.includes(barcodeVal)));
+
+        if (matchRaw) return true;
+
+        // 2. Pure alphanumeric matching (handles user typing '#1', '202609280001', 'ORD1234', camera barcode scanning)
+        if (cleanQuery) {
+          const cleanOrderNum = rawOrderNum.replace(/[^a-z0-9]/gi, '');
+          const cleanDayOrderNo = rawDayOrderNo.replace(/[^a-z0-9]/gi, '');
+          const cleanBarcode = barcodeVal.replace(/[^a-z0-9]/gi, '');
+          const cleanId = rawId.replace(/[^a-z0-9]/gi, '');
+          const cleanPayRef = rawPayRef.replace(/[^a-z0-9]/gi, '');
+          const cleanTable = tableNo.replace(/[^a-z0-9]/gi, '');
+
+          const matchClean =
+            (cleanOrderNum && cleanOrderNum.includes(cleanQuery)) ||
+            (cleanDayOrderNo && (cleanDayOrderNo === cleanQuery || cleanDayOrderNo.includes(cleanQuery))) ||
+            (cleanBarcode && (cleanBarcode.includes(cleanQuery) || cleanQuery.includes(cleanBarcode))) ||
+            (cleanId && cleanId.includes(cleanQuery)) ||
+            (cleanPayRef && cleanPayRef.includes(cleanQuery)) ||
+            (cleanTable && cleanTable.includes(cleanQuery));
+
+          if (matchClean) return true;
+        }
+
+        return false;
       });
     }
 
@@ -701,7 +870,7 @@ const OrderListScreen = ({ navigation, route }) => {
   };
 
   const renderOrderItem = ({ item }) => {
-    const { orderNumber, dayOrderNo, paymentReference } = extractOrderNumbers(item);
+    const { orderNumber, dayOrderNo, paymentReference, barcode } = extractOrderNumbers(item);
     const isPaymentDone = (item.payment_status === 'paid' || item.status === 'completed' || item.status === 'paid');
 
     return (
@@ -715,6 +884,9 @@ const OrderListScreen = ({ navigation, route }) => {
             <Text style={styles.orderId}>Order No: {orderNumber}</Text>
             {dayOrderNo ? (
               <Text style={styles.dayOrderId}>Day Order No: #{dayOrderNo}</Text>
+            ) : null}
+            {barcode && barcode !== orderNumber ? (
+              <Text style={styles.orderBarcodeText}>Barcode: {barcode}</Text>
             ) : null}
           </View>
           <Text style={[styles.orderStatus, { color: getOrderStatusColor(item.status) }]}>
@@ -885,6 +1057,16 @@ const OrderListScreen = ({ navigation, route }) => {
         <View style={styles.headerActions}>
           {canManageOrders && (
             <TouchableOpacity
+              onPress={openQuickSaleModal}
+              style={styles.quickSaleHeaderBtn}
+              accessibilityLabel="Quick Direct Sale"
+            >
+              <Icon name="bolt" size={13} color="#FFFFFF" style={{ marginRight: 4 }} />
+              <Text style={styles.quickSaleHeaderBtnText}>+ Quick Sale</Text>
+            </TouchableOpacity>
+          )}
+          {canManageOrders && (
+            <TouchableOpacity
               onPress={() => setActiveMainTab((prev) => (prev === 'orders' ? 'report' : 'orders'))}
               style={[styles.salesReportHeaderBtn, activeMainTab === 'report' && styles.salesReportHeaderBtnActive]}
               accessibilityLabel="Toggle Sales Report"
@@ -953,7 +1135,7 @@ const OrderListScreen = ({ navigation, route }) => {
         </View>
       ) : (
         <>
-          {/* Segmented Top Toggle between Orders and Sales Report (for Sellers & Admins) */}
+          {/* Segmented Top Toggle between Orders, P&L Expenses, and Sales Report (for Sellers & Admins) */}
           {canManageOrders && (
             <View style={styles.mainTabSegmentContainer}>
               <TouchableOpacity
@@ -963,12 +1145,28 @@ const OrderListScreen = ({ navigation, route }) => {
               >
                 <Icon
                   name="list-alt"
-                  size={14}
-                  color={activeMainTab === 'orders' ? '#007AFF' : '#64748B'}
-                  style={{ marginRight: 6 }}
+                  size={13}
+                  color={activeMainTab === 'orders' ? '#0F172A' : '#64748B'}
+                  style={{ marginRight: 5 }}
                 />
                 <Text style={[styles.mainTabSegmentText, activeMainTab === 'orders' && styles.mainTabSegmentTextActive]}>
                   Orders ({orders.length})
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.mainTabSegment, activeMainTab === 'pnl' && styles.mainTabSegmentActive]}
+                onPress={() => setActiveMainTab('pnl')}
+                activeOpacity={0.8}
+              >
+                <Icon
+                  name="money"
+                  size={13}
+                  color={activeMainTab === 'pnl' ? '#059669' : '#64748B'}
+                  style={{ marginRight: 5 }}
+                />
+                <Text style={[styles.mainTabSegmentText, activeMainTab === 'pnl' && [styles.mainTabSegmentTextActive, { color: '#059669' }]]}>
+                  P&L / Expenses
                 </Text>
               </TouchableOpacity>
 
@@ -979,18 +1177,23 @@ const OrderListScreen = ({ navigation, route }) => {
               >
                 <Icon
                   name="bar-chart"
-                  size={14}
-                  color={activeMainTab === 'report' ? '#007AFF' : '#64748B'}
-                  style={{ marginRight: 6 }}
+                  size={13}
+                  color={activeMainTab === 'report' ? '#4F46E5' : '#64748B'}
+                  style={{ marginRight: 5 }}
                 />
-                <Text style={[styles.mainTabSegmentText, activeMainTab === 'report' && styles.mainTabSegmentTextActive]}>
-                  Sales & Hourly Report
+                <Text style={[styles.mainTabSegmentText, activeMainTab === 'report' && [styles.mainTabSegmentTextActive, { color: '#4F46E5' }]]}>
+                  Sales Report
                 </Text>
               </TouchableOpacity>
             </View>
           )}
 
-          {canManageOrders && activeMainTab === 'report' ? (
+          {canManageOrders && activeMainTab === 'pnl' ? (
+            <SellerPnLReport
+              sellerId={sellerId || currentUser?.id}
+              sellerName={sellerName}
+            />
+          ) : canManageOrders && activeMainTab === 'report' ? (
             <SellerSalesReport
               sellerId={sellerId || currentUser?.id}
               sellerName={sellerName}
@@ -1027,6 +1230,17 @@ const OrderListScreen = ({ navigation, route }) => {
                     >
                       <Icon name="barcode" size={16} color="#FFFFFF" style={{ marginRight: 6 }} />
                       <Text style={styles.barcodeScanBtnText}>Scan</Text>
+                    </TouchableOpacity>
+                  )}
+                  {canManageOrders && (
+                    <TouchableOpacity
+                      style={styles.quickSaleActionBtn}
+                      onPress={openQuickSaleModal}
+                      activeOpacity={0.8}
+                      accessibilityLabel="Quick Direct Sale"
+                    >
+                      <Icon name="bolt" size={14} color="#FFFFFF" style={{ marginRight: 5 }} />
+                      <Text style={styles.quickSaleActionBtnText}>Quick Sale</Text>
                     </TouchableOpacity>
                   )}
                 </View>
@@ -1353,6 +1567,218 @@ const OrderListScreen = ({ navigation, route }) => {
         </View>
       </Modal>
 
+      {/* Quick Direct Sale Modal */}
+      <Modal
+        visible={quickSaleModalVisible}
+        animationType="slide"
+        transparent
+        onRequestClose={() => setQuickSaleModalVisible(false)}
+      >
+        <View style={styles.quickSaleModalOverlay}>
+          <View style={styles.quickSaleModalContent}>
+            {/* Header */}
+            <View style={styles.quickSaleModalHeader}>
+              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                <View style={styles.quickSaleIconBadge}>
+                  <Icon name="bolt" size={16} color="#059669" />
+                </View>
+                <View style={{ marginLeft: 10 }}>
+                  <Text style={styles.quickSaleModalTitle}>⚡ Quick Counter Sale</Text>
+                  <Text style={styles.quickSaleModalSub}>Direct UPI / Cash walk-in entry</Text>
+                </View>
+              </View>
+              <TouchableOpacity
+                onPress={() => setQuickSaleModalVisible(false)}
+                style={styles.quickSaleCloseBtn}
+              >
+                <Icon name="times" size={16} color="#64748B" />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: '80vh' }}>
+              {/* Sale Amount Input */}
+              <Text style={styles.quickSaleInputLabel}>Sale Amount (₹) *</Text>
+              <View style={styles.quickSaleAmountRow}>
+                <Text style={styles.quickSaleCurrencySymbol}>₹</Text>
+                <TextInput
+                  style={styles.quickSaleAmountInput}
+                  placeholder="0.00"
+                  placeholderTextColor="#94A3B8"
+                  keyboardType="numeric"
+                  value={quickSaleAmount}
+                  onChangeText={setQuickSaleAmount}
+                  autoFocus={Platform.OS === 'web'}
+                />
+                {Boolean(quickSaleAmount) && (
+                  <TouchableOpacity
+                    onPress={() => setQuickSaleAmount('')}
+                    style={styles.quickSaleClearAmtBtn}
+                  >
+                    <Icon name="times-circle" size={18} color="#94A3B8" />
+                  </TouchableOpacity>
+                )}
+              </View>
+
+              {/* Quick Amount Increment Chips */}
+              <View style={styles.quickAmtChipsRow}>
+                {[10, 20, 50, 100, 200, 500].map((val) => (
+                  <TouchableOpacity
+                    key={val}
+                    style={styles.quickAmtChip}
+                    onPress={() => handleQuickAddAmount(val)}
+                  >
+                    <Text style={styles.quickAmtChipText}>+₹{val}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+
+              {/* Payment Method Selector */}
+              <Text style={[styles.quickSaleInputLabel, { marginTop: 14 }]}>Payment Method *</Text>
+              <View style={styles.quickPayMethodRow}>
+                <TouchableOpacity
+                  style={[styles.quickPayMethodBtn, quickSaleMethod === 'upi' && styles.quickPayMethodBtnActiveUpi]}
+                  onPress={() => setQuickSaleMethod('upi')}
+                >
+                  <Icon
+                    name="qrcode"
+                    size={14}
+                    color={quickSaleMethod === 'upi' ? '#FFFFFF' : '#059669'}
+                    style={{ marginRight: 6 }}
+                  />
+                  <Text style={[styles.quickPayMethodBtnText, quickSaleMethod === 'upi' && styles.quickPayMethodBtnTextActive]}>
+                    UPI / GPay / QR
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[styles.quickPayMethodBtn, quickSaleMethod === 'cash' && styles.quickPayMethodBtnActiveCash]}
+                  onPress={() => setQuickSaleMethod('cash')}
+                >
+                  <Icon
+                    name="money"
+                    size={14}
+                    color={quickSaleMethod === 'cash' ? '#FFFFFF' : '#0284C7'}
+                    style={{ marginRight: 6 }}
+                  />
+                  <Text style={[styles.quickPayMethodBtnText, quickSaleMethod === 'cash' && styles.quickPayMethodBtnTextActive]}>
+                    Cash
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[styles.quickPayMethodBtn, quickSaleMethod === 'card' && styles.quickPayMethodBtnActiveCard]}
+                  onPress={() => setQuickSaleMethod('card')}
+                >
+                  <Icon
+                    name="credit-card"
+                    size={14}
+                    color={quickSaleMethod === 'card' ? '#FFFFFF' : '#64748B'}
+                    style={{ marginRight: 6 }}
+                  />
+                  <Text style={[styles.quickPayMethodBtnText, quickSaleMethod === 'card' && styles.quickPayMethodBtnTextActive]}>
+                    Card / Other
+                  </Text>
+                </TouchableOpacity>
+              </View>
+
+              {/* UPI UTR / Reference (Optional) */}
+              {quickSaleMethod === 'upi' && (
+                <>
+                  <Text style={[styles.quickSaleInputLabel, { marginTop: 12 }]}>
+                    UPI Transaction ID / UTR / Note (Optional)
+                  </Text>
+                  <TextInput
+                    style={styles.quickSaleTextInput}
+                    placeholder="e.g. 4291823901 or GPay Note"
+                    placeholderTextColor="#94A3B8"
+                    value={quickSaleUpiRef}
+                    onChangeText={setQuickSaleUpiRef}
+                  />
+                </>
+              )}
+
+              {/* Order / Sale Type */}
+              <Text style={[styles.quickSaleInputLabel, { marginTop: 12 }]}>Sale Type</Text>
+              <View style={styles.quickTypeRow}>
+                <TouchableOpacity
+                  style={[styles.quickTypeBtn, quickSaleType === 'takeaway' && styles.quickTypeBtnActive]}
+                  onPress={() => setQuickSaleType('takeaway')}
+                >
+                  <Text style={[styles.quickTypeText, quickSaleType === 'takeaway' && styles.quickTypeTextActive]}>
+                    🛍️ Parcel / Takeaway
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.quickTypeBtn, quickSaleType === 'dine_in' && styles.quickTypeBtnActive]}
+                  onPress={() => setQuickSaleType('dine_in')}
+                >
+                  <Text style={[styles.quickTypeText, quickSaleType === 'dine_in' && styles.quickTypeTextActive]}>
+                    🍽️ Dine-in / Table
+                  </Text>
+                </TouchableOpacity>
+              </View>
+
+              {/* Optional Customer Mobile */}
+              <Text style={[styles.quickSaleInputLabel, { marginTop: 12 }]}>
+                Customer Mobile (Optional)
+              </Text>
+              <TextInput
+                style={styles.quickSaleTextInput}
+                placeholder="10-digit mobile number"
+                placeholderTextColor="#94A3B8"
+                keyboardType="phone-pad"
+                maxLength={10}
+                value={quickSaleCustomerMobile}
+                onChangeText={setQuickSaleCustomerMobile}
+              />
+
+              {/* Optional Note / Remarks */}
+              <Text style={[styles.quickSaleInputLabel, { marginTop: 12 }]}>
+                Remarks / Description (Optional)
+              </Text>
+              <TextInput
+                style={styles.quickSaleTextInput}
+                placeholder="e.g. Direct Counter UPI Sale"
+                placeholderTextColor="#94A3B8"
+                value={quickSaleNote}
+                onChangeText={setQuickSaleNote}
+              />
+
+              {/* Actions */}
+              <View style={styles.quickSaleModalActions}>
+                <TouchableOpacity
+                  style={styles.quickSaleCancelBtn}
+                  onPress={() => setQuickSaleModalVisible(false)}
+                  disabled={isRecordingQuickSale}
+                >
+                  <Text style={styles.quickSaleCancelText}>Cancel</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[
+                    styles.quickSaleConfirmBtn,
+                    (!quickSaleAmount || Number(quickSaleAmount) <= 0 || isRecordingQuickSale) && { opacity: 0.6 }
+                  ]}
+                  onPress={handleRecordQuickSale}
+                  disabled={!quickSaleAmount || Number(quickSaleAmount) <= 0 || isRecordingQuickSale}
+                >
+                  {isRecordingQuickSale ? (
+                    <ActivityIndicator size="small" color="#FFFFFF" />
+                  ) : (
+                    <>
+                      <Icon name="check" size={14} color="#FFFFFF" style={{ marginRight: 6 }} />
+                      <Text style={styles.quickSaleConfirmText}>
+                        Record Sale {quickSaleAmount && Number(quickSaleAmount) > 0 ? `(₹${Number(quickSaleAmount).toFixed(2)})` : ''}
+                      </Text>
+                    </>
+                  )}
+                </TouchableOpacity>
+              </View>
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
       {/* Mobile Camera Barcode Scanner for Store Orders */}
       {isBarcodeScannerEnabled && (
         <BarcodeScannerModal
@@ -1392,6 +1818,41 @@ const styles = StyleSheet.create({
     maxHeight: Platform.OS === 'web' ? '100vh' : undefined,
     minHeight: 0,
     overflow: 'hidden',
+  },
+  mainTabSegmentContainer: {
+    flexDirection: 'row',
+    backgroundColor: '#F1F5F9',
+    padding: 3,
+    marginHorizontal: 12,
+    marginTop: 8,
+    marginBottom: 4,
+    borderRadius: 9,
+    gap: 4,
+  },
+  mainTabSegment: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 7,
+    borderRadius: 7,
+  },
+  mainTabSegmentActive: {
+    backgroundColor: '#FFFFFF',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.08,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  mainTabSegmentText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#64748B',
+  },
+  mainTabSegmentTextActive: {
+    fontWeight: '700',
+    color: '#0F172A',
   },
   list: {
     flex: 1,
@@ -1466,6 +1927,262 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontWeight: '700',
     fontSize: 13,
+  },
+  quickSaleHeaderBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#059669',
+    paddingHorizontal: 9,
+    paddingVertical: 6,
+    borderRadius: 7,
+    marginRight: 8,
+  },
+  quickSaleHeaderBtnText: {
+    color: '#FFFFFF',
+    fontWeight: '700',
+    fontSize: 11,
+  },
+  salesReportHeaderBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#EEF2FF',
+    borderColor: '#C7D2FE',
+    borderWidth: 1,
+    paddingHorizontal: 9,
+    paddingVertical: 6,
+    borderRadius: 7,
+    marginRight: 8,
+  },
+  salesReportHeaderBtnActive: {
+    backgroundColor: '#007AFF',
+    borderColor: '#007AFF',
+  },
+  salesReportHeaderBtnText: {
+    color: '#007AFF',
+    fontWeight: '700',
+    fontSize: 11,
+  },
+  salesReportHeaderBtnTextActive: {
+    color: '#FFFFFF',
+  },
+  quickSaleActionBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#059669',
+    paddingHorizontal: 11,
+    borderRadius: 8,
+    marginLeft: 8,
+    height: 42,
+  },
+  quickSaleActionBtnText: {
+    color: '#FFFFFF',
+    fontWeight: '700',
+    fontSize: 13,
+  },
+  quickSaleModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(15, 23, 42, 0.65)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 16,
+  },
+  quickSaleModalContent: {
+    width: '100%',
+    maxWidth: 440,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    padding: 20,
+    maxHeight: '92%',
+  },
+  quickSaleModalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
+    paddingBottom: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F1F5F9',
+  },
+  quickSaleIconBadge: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#D1FAE5',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  quickSaleModalTitle: {
+    fontSize: 17,
+    fontWeight: '800',
+    color: '#0F172A',
+  },
+  quickSaleModalSub: {
+    fontSize: 12,
+    color: '#64748B',
+    marginTop: 2,
+  },
+  quickSaleCloseBtn: {
+    padding: 6,
+    borderRadius: 16,
+    backgroundColor: '#F1F5F9',
+  },
+  quickSaleInputLabel: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#475569',
+    marginBottom: 6,
+  },
+  quickSaleAmountRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F8FAFC',
+    borderRadius: 10,
+    borderWidth: 1.5,
+    borderColor: '#10B981',
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+  },
+  quickSaleCurrencySymbol: {
+    fontSize: 24,
+    fontWeight: '800',
+    color: '#059669',
+    marginRight: 6,
+  },
+  quickSaleAmountInput: {
+    flex: 1,
+    fontSize: 24,
+    fontWeight: '800',
+    color: '#0F172A',
+    paddingVertical: 6,
+  },
+  quickSaleClearAmtBtn: {
+    padding: 6,
+  },
+  quickAmtChipsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginTop: 10,
+  },
+  quickAmtChip: {
+    paddingHorizontal: 11,
+    paddingVertical: 6,
+    borderRadius: 6,
+    backgroundColor: '#ECFDF5',
+    borderWidth: 1,
+    borderColor: '#A7F3D0',
+  },
+  quickAmtChipText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#065F46',
+  },
+  quickPayMethodRow: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  quickPayMethodBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 10,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#CBD5E1',
+    backgroundColor: '#F8FAFC',
+  },
+  quickPayMethodBtnActiveUpi: {
+    backgroundColor: '#059669',
+    borderColor: '#059669',
+  },
+  quickPayMethodBtnActiveCash: {
+    backgroundColor: '#0284C7',
+    borderColor: '#0284C7',
+  },
+  quickPayMethodBtnActiveCard: {
+    backgroundColor: '#475569',
+    borderColor: '#475569',
+  },
+  quickPayMethodBtnText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#475569',
+  },
+  quickPayMethodBtnTextActive: {
+    color: '#FFFFFF',
+  },
+  quickSaleTextInput: {
+    backgroundColor: '#F8FAFC',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#CBD5E1',
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    fontSize: 13,
+    color: '#0F172A',
+  },
+  quickTypeRow: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  quickTypeBtn: {
+    flex: 1,
+    paddingVertical: 8,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    backgroundColor: '#F8FAFC',
+    alignItems: 'center',
+  },
+  quickTypeBtnActive: {
+    backgroundColor: '#0F172A',
+    borderColor: '#0F172A',
+  },
+  quickTypeText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#475569',
+  },
+  quickTypeTextActive: {
+    color: '#FFFFFF',
+    fontWeight: '700',
+  },
+  quickSaleModalActions: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 18,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#F1F5F9',
+  },
+  quickSaleCancelBtn: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#CBD5E1',
+    alignItems: 'center',
+  },
+  quickSaleCancelText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#475569',
+  },
+  quickSaleConfirmBtn: {
+    flex: 2,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#059669',
+    paddingVertical: 12,
+    borderRadius: 8,
+  },
+  quickSaleConfirmText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#FFFFFF',
   },
   statusFilterContainer: {
     flexDirection: 'row',
@@ -1625,6 +2342,13 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#0284C7',
     marginTop: 2,
+  },
+  orderBarcodeText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#475569',
+    marginTop: 2,
+    fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace',
   },
   orderStatus: {
     fontSize: 13,

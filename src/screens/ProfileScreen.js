@@ -251,6 +251,15 @@ const ProfileScreen = ({ navigation, route }) => {
       const updated = { ...(printerConfig || DEFAULT_PRINTER_CONFIG), printOrderBarcode: val };
       setPrinterConfig(updated);
       await savePrinterConfig(updated);
+      syncTaxSettingsToAuth(updated);
+      const targetId = profile?.id || currentUser?.id;
+      if (targetId) {
+        try {
+          await supabase.from('profiles').update({ print_order_barcode: val }).eq('id', targetId);
+        } catch (dbErr) {
+          console.warn('Could not update print_order_barcode in profiles table:', dbErr?.message);
+        }
+      }
       showAlert(
         'Order Barcode Updated',
         val
@@ -311,6 +320,7 @@ const ProfileScreen = ({ navigation, route }) => {
             service_cost_rate: cfg.serviceCostRate !== undefined ? Number(cfg.serviceCostRate) : 0,
             print_tax_breakdown: cfg.printTaxBreakdown !== false,
             print_qr_on_receipt: cfg.printDynamicQr !== false,
+            print_order_barcode: cfg.printOrderBarcode !== false,
           },
         },
       });
@@ -599,6 +609,7 @@ const ProfileScreen = ({ navigation, route }) => {
             serviceCostRate: data.service_cost_rate !== undefined && data.service_cost_rate !== null ? Number(data.service_cost_rate) : (metaTax.service_cost_rate !== undefined ? Number(metaTax.service_cost_rate) : undefined),
             printTaxBreakdown: data.print_tax_breakdown !== undefined && data.print_tax_breakdown !== null ? Boolean(data.print_tax_breakdown) : (metaTax.print_tax_breakdown !== undefined ? Boolean(metaTax.print_tax_breakdown) : undefined),
             printDynamicQr: data.print_qr_on_receipt !== undefined && data.print_qr_on_receipt !== null ? Boolean(data.print_qr_on_receipt) : (metaTax.print_qr_on_receipt !== undefined ? Boolean(metaTax.print_qr_on_receipt) : undefined),
+            printOrderBarcode: data.print_order_barcode !== undefined && data.print_order_barcode !== null ? Boolean(data.print_order_barcode) : (metaTax.print_order_barcode !== undefined ? Boolean(metaTax.print_order_barcode) : undefined),
           };
           const cleanSynced = Object.fromEntries(Object.entries(syncedTaxConfig).filter(([_, v]) => v !== undefined));
           if (Object.keys(cleanSynced).length > 0) {
@@ -2146,6 +2157,35 @@ const ProfileScreen = ({ navigation, route }) => {
               </View>
             </View>
             <Icon name="chevron-right" size={14} color="#0284C7" />
+          </TouchableOpacity>
+
+          {/* Quick shortcut to Profit & Loss / Store Expenses */}
+          <TouchableOpacity
+            style={[styles.salesReportProfileBtn, { marginTop: 10, borderColor: '#A7F3D0', backgroundColor: '#ECFDF5' }]}
+            activeOpacity={0.8}
+            onPress={() => {
+              const sid = currentUser?.id || profile?.id;
+              const sname = profile?.business_name || profile?.full_name || '';
+              const nav = navigation?.getParent?.() || navigation;
+              nav.navigate('SellerSalesReport', {
+                sellerId: sid,
+                sellerName: sname,
+                initialTab: 'pnl',
+              });
+            }}
+          >
+            <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
+              <View style={[styles.salesReportProfileIcon, { backgroundColor: '#D1FAE5' }]}>
+                <Icon name="money" size={16} color="#059669" />
+              </View>
+              <View style={{ marginLeft: 10, flex: 1 }}>
+                <Text style={[styles.salesReportProfileTitle, { color: '#065F46' }]}>Profit & Loss / Store Expenses</Text>
+                <Text style={styles.salesReportProfileSub}>
+                  Groceries, parcel cost, store rent, employee salary & net margin
+                </Text>
+              </View>
+            </View>
+            <Icon name="chevron-right" size={14} color="#059669" />
           </TouchableOpacity>
         </View>
       )}

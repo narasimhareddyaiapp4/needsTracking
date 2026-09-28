@@ -117,6 +117,7 @@ export default function SellerEmployeesScreen({ navigation, route }) {
   const [formMobile, setFormMobile] = useState('');
   const [formDesignation, setFormDesignation] = useState('cashier');
   const [formPin, setFormPin] = useState('');
+  const [formMonthlySalary, setFormMonthlySalary] = useState('');
   const [formPermissions, setFormPermissions] = useState({
     can_pos_bill: true,
     can_manage_orders: true,
@@ -167,6 +168,7 @@ export default function SellerEmployeesScreen({ navigation, route }) {
     setFormMobile('');
     setFormDesignation('cashier');
     setFormPin('');
+    setFormMonthlySalary('');
     setFormPermissions({
       can_pos_bill: true,
       can_manage_orders: true,
@@ -184,6 +186,7 @@ export default function SellerEmployeesScreen({ navigation, route }) {
     setFormMobile(emp.mobile || '');
     setFormDesignation(emp.designation || 'cashier');
     setFormPin(emp.pin_code || '');
+    setFormMonthlySalary(emp.monthly_salary ? emp.monthly_salary.toString() : '');
     setFormPermissions(emp.permissions || {
       can_pos_bill: true,
       can_manage_orders: true,
@@ -242,6 +245,7 @@ export default function SellerEmployeesScreen({ navigation, route }) {
           mobile: formMobile,
           designation: formDesignation,
           pin_code: formPin,
+          monthly_salary: formMonthlySalary ? Number(formMonthlySalary) : 0,
           permissions: formPermissions,
         });
         showAlert('Success', 'Staff member updated successfully');
@@ -252,6 +256,7 @@ export default function SellerEmployeesScreen({ navigation, route }) {
           mobile: formMobile,
           designation: formDesignation,
           pin_code: formPin,
+          monthly_salary: formMonthlySalary ? Number(formMonthlySalary) : 0,
           permissions: formPermissions,
         });
         showAlert('Success', 'New staff member added successfully! They can now log in.');
@@ -329,6 +334,13 @@ export default function SellerEmployeesScreen({ navigation, route }) {
                 <View style={styles.pinBadge}>
                   <Icon name="key" size={10} color="#64748B" style={{ marginRight: 3 }} />
                   <Text style={styles.pinBadgeText}>PIN: {item.pin_code}</Text>
+                </View>
+              )}
+              {Number(item.monthly_salary) > 0 && (
+                <View style={[styles.pinBadge, { backgroundColor: '#EEF2FF', borderColor: '#C7D2FE', marginLeft: 6 }]}>
+                  <Text style={[styles.pinBadgeText, { color: '#4F46E5', fontWeight: '700' }]}>
+                    ₹{Number(item.monthly_salary).toFixed(0)}/mo
+                  </Text>
                 </View>
               )}
             </View>
@@ -522,6 +534,17 @@ export default function SellerEmployeesScreen({ navigation, route }) {
                 maxLength={6}
                 value={formPin}
                 onChangeText={setFormPin}
+              />
+
+              {/* Monthly Salary */}
+              <Text style={[styles.inputLabel, { marginTop: 12 }]}>Monthly Salary (₹ for P&L / Expense reporting)</Text>
+              <TextInput
+                style={[styles.input, { borderColor: colors.border, color: colors.text }]}
+                placeholder="e.g. 15000"
+                placeholderTextColor="#94A3B8"
+                keyboardType="numeric"
+                value={formMonthlySalary}
+                onChangeText={setFormMonthlySalary}
               />
 
               {/* Role Presets */}

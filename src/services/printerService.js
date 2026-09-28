@@ -157,25 +157,35 @@ const CODE128_PATTERNS = [
 /**
  * Generates a clean, standalone, high-contrast SVG 1D Code 128 barcode
  * with quiet zones and human-readable text. Zero external dependencies.
+ * Strips all special characters to ensure crisp scanning and zero print errors.
  */
 export const generateCode128Svg = (text, options = {}) => {
-  const str = String(text || '').trim();
+  // Strip all special characters to guarantee clean, compact, 100% scannable barcode
+  const str = String(text || '').replace(/[^A-Za-z0-9]/g, '').trim();
   if (!str) return '';
 
-  const height = options.height || 42;
-  const barWidth = options.barWidth || 1.35;
-  const quietZone = 10 * barWidth;
+  // Limit barcode length for receipt widths if a long identifier was passed
+  const codeStr = str.length > 20 ? str.slice(0, 16).toUpperCase() : str;
+
+  const height = options.height || 40;
+  // Adaptive barWidth to fit comfortably in 58mm (~200px) and 80mm (~280px) paper
+  let barWidth = options.barWidth || 1.25;
+  const estimatedModules = codeStr.length * 11 + 35 + 20; // 11 per char + start + stop + checksum + quiet zones
+  if (estimatedModules * barWidth > 205) {
+    barWidth = Math.max(0.85, 200 / estimatedModules);
+  }
+  const quietZone = Math.round(10 * barWidth);
 
   const START_B = 104;
   const STOP = 106;
   const codes = [START_B];
   let checkSum = START_B;
 
-  for (let i = 0; i < str.length; i++) {
-    const code = str.charCodeAt(i) - 32;
+  for (let i = 0; i < codeStr.length; i++) {
+    const code = codeStr.charCodeAt(i) - 32;
     if (code < 0 || code > 95) continue;
     codes.push(code);
-    checkSum += code * (i + 1);
+    checkSum += code * (codes.length - 1);
   }
   codes.push(checkSum % 103);
   codes.push(STOP);
@@ -201,10 +211,10 @@ export const generateCode128Svg = (text, options = {}) => {
     isBar = !isBar;
   }
 
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${svgWidth} ${height + 13}" width="100%" style="max-width:${svgWidth}px;display:block;margin:0 auto;shape-rendering:crispEdges;">
-    <rect width="${svgWidth}" height="${height + 13}" fill="#fff"/>
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${svgWidth} ${height + 14}" width="100%" style="max-width:${svgWidth}px;display:block;margin:0 auto;shape-rendering:crispEdges;">
+    <rect width="${svgWidth}" height="${height + 14}" fill="#fff"/>
     ${rects}
-    <text x="${(svgWidth / 2).toFixed(1)}" y="${height + 10}" font-family="Courier, monospace" font-size="10" font-weight="bold" text-anchor="middle" fill="#000">${escapeHtml(str)}</text>
+    <text x="${(svgWidth / 2).toFixed(1)}" y="${height + 11}" font-family="Courier, monospace" font-size="10" font-weight="bold" text-anchor="middle" fill="#000">${escapeHtml(codeStr)}</text>
   </svg>`;
 };
 
@@ -371,10 +381,34 @@ export const extractOrderNumbers = (order = {}) => {
     }
   }
 
+  // Clean order number: strip leading '#' or symbols, keep alphanumeric/standard
+  const rawOrderNum = String(orderNum).trim();
+  const cleanOrderNum = rawOrderNum.replace(/^[#\s]+/, '');
+
+  // Extract or derive clean 1D barcode strictly without any special characters (alphanumeric only)
+  let rawBarcode = order.barcode || null;
+  if (!rawBarcode && order.shipping_address) {
+    let shipObj = order.shipping_address;
+    if (typeof shipObj === 'string' && shipObj.includes('barcode')) {
+      try {
+        shipObj = JSON.parse(shipObj);
+      } catch (_) {}
+    }
+    if (typeof shipObj === 'object' && shipObj !== null) {
+      rawBarcode = shipObj.barcode || null;
+    }
+  }
+  if (!rawBarcode) {
+    rawBarcode = cleanOrderNum !== 'N/A' ? cleanOrderNum : (rawId ? String(rawId).substring(0, 10) : '');
+  }
+  const cleanBarcode = String(rawBarcode || '').replace(/[^A-Za-z0-9]/g, '').trim();
+
   return {
-    orderNumber: String(orderNum),
+    orderNumber: cleanOrderNum,
+    rawOrderNumber: rawOrderNum,
     dayOrderNo: dayOrderNo ? String(dayOrderNo) : null,
     paymentReference: paymentReference ? String(paymentReference) : null,
+    barcode: cleanBarcode,
   };
 };
 
@@ -489,17 +523,20 @@ export const generateEscPosBytes = (data, config = DEFAULT_PRINTER_CONFIG) => {
     // Optional 1D Code-128 Order Barcode for instant mobile camera / scanner tracking
     if (config.printOrderBarcode !== false) {
       const rawBarcode = data.barcode || orderNoStr;
-      const cleanBcCode = String(rawBarcode).replace(/[^A-Za-z0-9_-]/g, '').trim();
-      if (cleanBcCode.length > 0 && cleanBcCode.length <= 32) {
+      // Strictly alphanumeric - zero special characters (no '#', '-', etc.) for 100% printer & scanner compatibility
+      const cleanBcCode = String(rawBarcode).replace(/[^A-Za-z0-9]/g, '').trim();
+      const code128Str = cleanBcCode.length > 20 ? cleanBcCode.slice(0, 16).toUpperCase() : cleanBcCode;
+      if (code128Str.length > 0 && code128Str.length <= 32) {
         try {
           addBytes(CMD_ALIGN_CENTER);
           addBytes([GS, 0x68, 52]); // Barcode height (52 dots)
           addBytes([GS, 0x77, is80mm ? 3 : 2]); // Module width (2 for 58mm, 3 for 80mm)
           addBytes([GS, 0x48, 2]); // HRI chars below barcode
           addBytes([GS, 0x66, 0]); // Font A
-          // ESC/POS Code 128 command: GS k 73 len data
-          const bcBytes = encoder.encode(cleanBcCode);
-          addBytes([GS, 0x6b, 73, bcBytes.length, ...bcBytes]);
+          // ESC/POS Code 128 (m = 73) requires code set selection character '{B' (0x7B, 0x42)
+          const bcBytes = encoder.encode(code128Str);
+          const code128Payload = [0x7b, 0x42, ...bcBytes];
+          addBytes([GS, 0x6b, 73, code128Payload.length, ...code128Payload]);
           addBytes([ESC, 0x64, 1]); // Small feed
           addBytes(CMD_ALIGN_LEFT);
         } catch (_) {}
@@ -908,8 +945,7 @@ export const generateReceiptHtml = (data, config = DEFAULT_PRINTER_CONFIG) => {
           <div class="meta-row"><span>Order No:</span><span class="bold">${data.orderId || data.rawOrderId || 'N/A'}</span></div>
           ${config.printOrderBarcode !== false && (data.barcode || data.orderId || data.rawOrderId) ? `
           <div class="barcode-container">
-            ${generateCode128Svg(String(data.barcode || data.orderId || data.rawOrderId), { height: is80mm ? 44 : 36, barWidth: is80mm ? 1.5 : 1.25 })}
-            <div style="font-size: 10px; font-weight: 600; letter-spacing: 1px; margin-top: 2px;">${String(data.barcode || data.orderId || data.rawOrderId)}</div>
+            ${generateCode128Svg(String(data.barcode || data.orderId || data.rawOrderId).replace(/[^A-Za-z0-9]/g, ''), { height: is80mm ? 44 : 36, barWidth: is80mm ? 1.4 : 1.15 })}
           </div>
           ` : ''}
           ${shouldPrintDayWise ? `<div class="meta-row"><span>Day Order No:</span><span class="bold">#${String(dayOrder).replace(/^#/,'')}</span></div>` : ''}
@@ -1407,7 +1443,7 @@ export const printReceipt = async (orderDetails, options = {}) => {
       try {
         const { data: sellerProf } = await supabase
           .from('profiles')
-          .select('upi_id, full_name, print_qr_on_receipt')
+          .select('upi_id, full_name, print_qr_on_receipt, print_order_barcode')
           .eq('id', sellerId)
           .maybeSingle();
 
@@ -1416,6 +1452,9 @@ export const printReceipt = async (orderDetails, options = {}) => {
             shouldPrintQr = false;
           } else if (sellerProf.print_qr_on_receipt === true) {
             shouldPrintQr = true;
+          }
+          if (sellerProf.print_order_barcode !== undefined && sellerProf.print_order_barcode !== null) {
+            config.printOrderBarcode = Boolean(sellerProf.print_order_barcode);
           }
           if (!sellerUpiId && sellerProf.upi_id) {
             sellerUpiId = sellerProf.upi_id;
@@ -1510,7 +1549,9 @@ export const printReceipt = async (orderDetails, options = {}) => {
       title: options.title || 'TAX INVOICE / ORDER RECEIPT',
       orderId: orderNumber,
       rawOrderId: orderId,
-      barcode: order.barcode || shippingObj?.barcode || orderNumber || orderId,
+      barcode: (order.barcode || shippingObj?.barcode || orderNumber || orderId)
+        ? String(order.barcode || shippingObj?.barcode || orderNumber || orderId).replace(/[^A-Za-z0-9]/g, '')
+        : '',
       dayOrderNo: resolvedDayOrderNo || null,
       dailyOrderNumber: resolvedDayOrderNo || null,
       dayWiseOrderNo: resolvedDayOrderNo || null,

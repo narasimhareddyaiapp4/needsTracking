@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { SMTPClient } from "https://deno.land/x/denomailer@1.6.0/mod.ts";
 
 export const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -419,8 +420,45 @@ serve(async (req) => {
         appUrl,
       });
 
+      const smtpHost = Deno.env.get("SMTP_HOST");
+      const smtpUser = Deno.env.get("SMTP_USER");
+      const smtpPass = Deno.env.get("SMTP_PASS");
+      const smtpPort = Number(Deno.env.get("SMTP_PORT") || 465);
       const resendApiKey = Deno.env.get("RESEND_API_KEY");
-      if (resendApiKey) {
+      const senderName = Deno.env.get("SMTP_SENDER_NAME") || "Orders";
+      const fromAddress = Deno.env.get("EMAIL_FROM") || 
+        (smtpUser ? `${senderName} <${smtpUser}>` : `${senderName} <orders@resend.dev>`);
+      const emailSubject = `📦 [Order #${orderNumber}] ${statusMeta.label}`;
+
+      if (smtpHost && smtpUser && smtpPass) {
+        try {
+          const client = new SMTPClient({
+            connection: {
+              hostname: smtpHost,
+              port: smtpPort,
+              tls: smtpPort === 465,
+              auth: {
+                username: smtpUser,
+                password: smtpPass,
+              },
+            },
+          });
+
+          await client.send({
+            from: fromAddress,
+            to: [buyerEmail],
+            subject: emailSubject,
+            html: emailHtml,
+          });
+          await client.close();
+
+          dispatchResults.email = { sent: true, method: "smtp", recipient: buyerEmail };
+          console.log(`[notify-order-update] Status update email sent via SMTP to: ${buyerEmail}`);
+        } catch (smtpErr: any) {
+          console.error("[notify-order-update] SMTP error:", smtpErr);
+          dispatchResults.email = { sent: false, method: "smtp", error: smtpErr?.message };
+        }
+      } else if (resendApiKey) {
         try {
           const resendRes = await fetch("https://api.resend.com/emails", {
             method: "POST",
@@ -429,21 +467,21 @@ serve(async (req) => {
               "Content-Type": "application/json",
             },
             body: JSON.stringify({
-              from: Deno.env.get("EMAIL_FROM") || "Orders <orders@resend.dev>",
+              from: fromAddress,
               to: [buyerEmail],
-              subject: `📦 [Order #${orderNumber}] ${statusMeta.label}`,
+              subject: emailSubject,
               html: emailHtml,
             }),
           });
           dispatchResults.email = await resendRes.json();
-          console.log(`[notify-order-update] Status update email sent to buyer: ${buyerEmail}`);
+          console.log(`[notify-order-update] Status update email sent to buyer via Resend: ${buyerEmail}`);
         } catch (resendErr: any) {
           console.error("[notify-order-update] Resend email error:", resendErr);
           dispatchResults.email = { error: resendErr?.message };
         }
       } else {
-        console.log(`[notify-order-update] RESEND_API_KEY not configured. Status email ready for ${buyerEmail}.`);
-        dispatchResults.email = { notice: "Set RESEND_API_KEY in Supabase secrets to dispatch automatically." };
+        console.log(`[notify-order-update] Neither SMTP nor Resend configured. Status email ready for ${buyerEmail}.`);
+        dispatchResults.email = { notice: "Set SMTP credentials or RESEND_API_KEY in Supabase secrets." };
       }
     } else {
       console.log(`[notify-order-update] No buyer email provided (optional for buyer) - skipping email dispatch.`);

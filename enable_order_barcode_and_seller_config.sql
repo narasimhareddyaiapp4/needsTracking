@@ -9,9 +9,12 @@
 -- 4. Reloads PostgREST schema cache.
 -- ============================================================================
 
--- 1. Add barcode scanner toggle column to profiles
+-- 1. Add barcode scanner and print order barcode toggle columns to profiles
 ALTER TABLE public.profiles 
 ADD COLUMN IF NOT EXISTS enable_order_barcode_scanner BOOLEAN DEFAULT false;
+
+ALTER TABLE public.profiles 
+ADD COLUMN IF NOT EXISTS print_order_barcode BOOLEAN DEFAULT true;
 
 -- 2. Add barcode column to orders table
 ALTER TABLE public.orders 
@@ -23,6 +26,9 @@ ON public.orders(barcode);
 
 CREATE INDEX IF NOT EXISTS idx_profiles_enable_order_barcode 
 ON public.profiles(enable_order_barcode_scanner);
+
+CREATE INDEX IF NOT EXISTS idx_profiles_print_order_barcode 
+ON public.profiles(print_order_barcode);
 
 -- 4. Grant table and column access to authenticated and anon roles
 GRANT SELECT, UPDATE ON public.profiles TO authenticated, anon;

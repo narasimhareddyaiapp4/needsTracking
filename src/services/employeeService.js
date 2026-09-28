@@ -53,6 +53,8 @@ export async function addSellerEmployee(sellerId, employeeData) {
     mobile: employeeData.mobile ? employeeData.mobile.trim() : null,
     designation: employeeData.designation || 'cashier',
     pin_code: employeeData.pin_code ? employeeData.pin_code.trim() : null,
+    monthly_salary: employeeData.monthly_salary ? Number(employeeData.monthly_salary) : 0,
+    daily_wage: employeeData.daily_wage ? Number(employeeData.daily_wage) : 0,
     permissions: employeeData.permissions || defaultPermissions,
     is_active: employeeData.is_active !== false,
   };
