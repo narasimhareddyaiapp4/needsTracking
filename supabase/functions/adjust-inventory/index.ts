@@ -66,6 +66,26 @@ serve(async (req) => {
       });
     }
 
+    // Trigger stock alert if stock reached low (<= 5) or out-of-stock (<= 0)
+    const oldQuantity = variant.quantity || 0;
+    const isTransitionToLow = oldQuantity > 5 && new_quantity <= 5 && new_quantity > 0;
+    const isTransitionToOut = oldQuantity > 0 && new_quantity <= 0;
+    if (isTransitionToLow || isTransitionToOut) {
+      try {
+        console.log(`[adjust-inventory] Triggering stock alert for variant ${product_variant_combination_id} (old: ${oldQuantity}, new: ${new_quantity})`);
+        await supabase.functions.invoke('send-stock-alert', {
+          body: {
+            product_variant_combination_id,
+            old_quantity: oldQuantity,
+            new_quantity,
+            threshold: 5,
+          },
+        });
+      } catch (alertErr) {
+        console.warn('[adjust-inventory] Stock alert notice:', alertErr);
+      }
+    }
+
     return new Response(JSON.stringify({ success: true, message: 'Inventory adjusted' }), {
       status: 200,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },

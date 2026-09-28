@@ -666,7 +666,12 @@ const CatalogScreen = ({ navigation, route }) => {
           }
 
           if (!isMounted) return;
-          setProducts(data || []);
+          const sortedData = (data || []).slice().sort((a, b) => {
+            const oA = (a.display_order !== undefined && a.display_order !== null) ? a.display_order : 999999;
+            const oB = (b.display_order !== undefined && b.display_order !== null) ? b.display_order : 999999;
+            return oA - oB;
+          });
+          setProducts(sortedData);
 
           // Pre-fetch seller contacts for instantaneous 0ms response when user taps Share
           try {
@@ -848,8 +853,8 @@ const CatalogScreen = ({ navigation, route }) => {
 
     const stock = combination.quantity !== undefined && combination.quantity !== null ? combination.quantity : 100; 
 
-    if (change > 0 && stock > 0 && currentQuantity >= stock) {
-        showAlert("Stock Limit", `Sorry, you can only add up to ${stock} items.`);
+    if (change > 0 && (stock <= 0 || currentQuantity >= stock)) {
+        showAlert("Stock Limit", stock <= 0 ? "Sorry, this item is out of stock." : `Sorry, you can only add up to ${stock} items.`);
         setUpdatingCart(false);
         return;
     }
@@ -1022,9 +1027,10 @@ const CatalogScreen = ({ navigation, route }) => {
 
     if (!itemToUpdate) return;
     
-    const stock = itemToUpdate.product_variant_combinations?.quantity || 100;
+    const comboQty = itemToUpdate.product_variant_combinations?.quantity;
+    const stock = comboQty !== undefined && comboQty !== null ? comboQty : 100;
     if (newQuantity > stock) {
-        showAlert("Stock Limit", `Sorry, you can only have up to ${stock} items in your cart.`);
+        showAlert("Stock Limit", stock <= 0 ? "Sorry, this item is out of stock." : `Sorry, you can only have up to ${stock} items in your cart.`);
         return;
     }
     
@@ -1216,6 +1222,10 @@ const CatalogScreen = ({ navigation, route }) => {
     const singleComboQty = quantityMap[singleComboId] || 0;
     const totalQuantity = productTotalQuantityInCart[item.id] || singleComboQty || 0;
     const totalStock = combos.reduce((sum, combo) => sum + (combo?.quantity || 0), 0);
+    const singleComboStock = singleCombo?.quantity !== undefined && singleCombo?.quantity !== null
+      ? singleCombo.quantity
+      : (item.quantity !== undefined && item.quantity !== null ? item.quantity : 100);
+    const isOutOfStock = isMultiVariant ? totalStock <= 0 : singleComboStock <= 0;
     const firstMedia = (item.product_media || []).find(m => isImageMedia(m) && (m.media_url || m.uri));
     const imageUrl = firstMedia ? (firstMedia.media_url || firstMedia.uri) : (item.image_url || null);
 
@@ -1326,18 +1336,29 @@ const CatalogScreen = ({ navigation, route }) => {
               <Text style={styles.cardStrikeMrp}>₹{defaultOffer.mrp}</Text>
             ) : null}
           </View>
-          <Text style={styles.stockText}>
-            In Stock: {totalStock} {item.unit || ''}
+          <Text style={[styles.stockText, isOutOfStock && styles.stockTextOut]}>
+            {isOutOfStock ? '• Out of Stock' : `In Stock: ${totalStock} ${item.unit || ''}`}
           </Text>
         </View>
 
         {isMultiVariant ? (
           <TouchableOpacity 
-            style={[styles.addButton, totalQuantity > 0 && styles.addButtonActive]} 
+            style={[
+              styles.addButton, 
+              totalQuantity > 0 && styles.addButtonActive,
+              isOutOfStock && totalQuantity === 0 && styles.addButtonDisabled,
+            ]} 
             onPress={() => openProductModal(item)}
+            disabled={isOutOfStock && totalQuantity === 0}
           >
-            <Text style={[styles.addButtonText, totalQuantity > 0 && styles.addButtonTextActive]}>
-              {totalQuantity > 0 ? `Qty: ${totalQuantity} (Options)` : '+ ADD (Options)'}
+            <Text style={[
+              styles.addButtonText, 
+              totalQuantity > 0 && styles.addButtonTextActive,
+              isOutOfStock && totalQuantity === 0 && styles.addButtonTextDisabled,
+            ]}>
+              {isOutOfStock && totalQuantity === 0
+                ? 'Out of Stock'
+                : (totalQuantity > 0 ? `Qty: ${totalQuantity} (Options)` : '+ ADD (Options)')}
             </Text>
           </TouchableOpacity>
         ) : (
@@ -1352,21 +1373,26 @@ const CatalogScreen = ({ navigation, route }) => {
               </TouchableOpacity>
               <Text style={styles.cardQtyText}>{totalQuantity}</Text>
               <TouchableOpacity 
-                style={styles.cardQtyBtnPlus}
+                style={[
+                  styles.cardQtyBtnPlus,
+                  (totalQuantity >= singleComboStock || updatingCart) && styles.cardQtyBtnDisabled,
+                ]}
                 onPress={() => handleUpdateCart(item, singleComboId, 1)} 
-                disabled={updatingCart}
+                disabled={updatingCart || totalQuantity >= singleComboStock}
               >
                 <Icon name="plus" size={14} color="#fff" />
               </TouchableOpacity>
             </View>
           ) : (
             <TouchableOpacity 
-              style={styles.addButton} 
+              style={[styles.addButton, isOutOfStock && styles.addButtonDisabled]} 
               onPress={() => handleUpdateCart(item, singleComboId, 1)}
-              disabled={updatingCart}
+              disabled={updatingCart || isOutOfStock}
             >
-              <Icon name="plus" size={12} color="#2E7D32" style={{ marginRight: 6 }} />
-              <Text style={styles.addButtonText}>ADD</Text>
+              {!isOutOfStock && <Icon name="plus" size={12} color="#2E7D32" style={{ marginRight: 6 }} />}
+              <Text style={[styles.addButtonText, isOutOfStock && styles.addButtonTextDisabled]}>
+                {isOutOfStock ? 'Out of Stock' : 'ADD'}
+              </Text>
             </TouchableOpacity>
           )
         )}
@@ -2931,6 +2957,10 @@ const styles = StyleSheet.create({
     color: '#388E3C',
     marginTop: 2,
   },
+  stockTextOut: {
+    color: '#dc2626',
+    fontWeight: '600',
+  },
   addButton: {
     backgroundColor: '#E8F5E9',
     borderRadius: 8,
@@ -2948,6 +2978,10 @@ const styles = StyleSheet.create({
     backgroundColor: '#C8E6C9',
     borderColor: '#81C784',
   },
+  addButtonDisabled: {
+    backgroundColor: '#F1F5F9',
+    borderColor: '#CBD5E1',
+  },
   addButtonText: {
     color: '#2E7D32',
     fontWeight: 'bold',
@@ -2955,6 +2989,9 @@ const styles = StyleSheet.create({
   },
   addButtonTextActive: {
     color: '#1B5E20',
+  },
+  addButtonTextDisabled: {
+    color: '#94A3B8',
   },
   cardQuantityContainer: {
     flexDirection: 'row',
@@ -2985,6 +3022,10 @@ const styles = StyleSheet.create({
     borderRadius: 6,
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  cardQtyBtnDisabled: {
+    backgroundColor: '#CBD5E1',
+    opacity: 0.6,
   },
   cardQtyText: {
     fontSize: 15,

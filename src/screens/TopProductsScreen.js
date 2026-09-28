@@ -191,6 +191,16 @@ const TopProductsScreen = ({ navigation, route }) => {
       return;
     }
 
+    const stock = combination.quantity !== undefined && combination.quantity !== null ? combination.quantity : 100;
+    if (stock <= 0) {
+      Alert.alert('Out of Stock', 'Sorry, this product variant is out of stock.');
+      return;
+    }
+    if (quantity > stock) {
+      Alert.alert('Stock Limit', `Sorry, you can only add up to ${stock} items.`);
+      return;
+    }
+
     console.log('handleAddToCart: Before getUser, user state:', user);
     const { data: { user: currentUser } } = await supabase.auth.getUser();
     console.log('handleAddToCart: After getUser, currentUser:', currentUser);
@@ -445,6 +455,7 @@ const TopProductsScreen = ({ navigation, route }) => {
                     const offer = calculateProductOffer(selectedProduct, selectedCombination);
                     const displayPrice = selectedCombination ? selectedCombination.price : (selectedProduct.amount || 0);
                     const displayQuantity = selectedCombination ? selectedCombination.quantity : 'N/A';
+                    const isOutOfStock = typeof displayQuantity === 'number' && displayQuantity <= 0;
 
                     return (
                       <>
@@ -467,7 +478,9 @@ const TopProductsScreen = ({ navigation, route }) => {
                             </Text>
                           </View>
                         )}
-                        <Text style={styles.stockText}>In Stock: {displayQuantity} {selectedProduct.unit}</Text>
+                        <Text style={[styles.stockText, isOutOfStock && styles.stockTextOut]}>
+                          {isOutOfStock ? '• Out of Stock' : `In Stock: ${displayQuantity} ${selectedProduct.unit}`}
+                        </Text>
                       </>
                     );
                   })()}
@@ -511,10 +524,22 @@ const TopProductsScreen = ({ navigation, route }) => {
                     </TouchableOpacity>
                   </View>
                   
-                  <TouchableOpacity style={styles.modalAddToCartButton} onPress={handleAddToCart}>
-                    <Icon name="shopping-cart" size={18} color="#fff" style={{ marginRight: 8 }} />
-                    <Text style={styles.modalAddToCartButtonText}>Add to Cart</Text>
-                  </TouchableOpacity>
+                  {(() => {
+                    const selectedCombination = getVariantCombination();
+                    const isOutOfStock = selectedCombination ? (selectedCombination.quantity !== undefined && selectedCombination.quantity !== null && selectedCombination.quantity <= 0) : false;
+                    return (
+                      <TouchableOpacity 
+                        style={[styles.modalAddToCartButton, isOutOfStock && styles.modalAddToCartButtonDisabled]} 
+                        onPress={handleAddToCart}
+                        disabled={isOutOfStock}
+                      >
+                        <Icon name="shopping-cart" size={18} color="#fff" style={{ marginRight: 8 }} />
+                        <Text style={styles.modalAddToCartButtonText}>
+                          {isOutOfStock ? 'Out of Stock' : 'Add to Cart'}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })()}
                 </View>
               </ScrollView>
             </View>
@@ -615,6 +640,10 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#555',
     marginBottom: 10,
+  },
+  stockTextOut: {
+    color: '#dc2626',
+    fontWeight: '700',
   },
   modalContainer: {
     flex: 1,
@@ -768,6 +797,10 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     marginTop: 15,
     elevation: 2,
+  },
+  modalAddToCartButtonDisabled: {
+    backgroundColor: '#94a3b8',
+    opacity: 0.7,
   },
   modalAddToCartButtonText: {
     color: '#fff',

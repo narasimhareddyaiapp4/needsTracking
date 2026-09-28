@@ -24,6 +24,8 @@ FUNCTIONS=(
     "notify-order-update"
     "reset-inventory"
     "restock-inventory"
+    "send-seller-order-notification"
+    "send-stock-alert"
     "update-product-quantity"
     "upload-image"
 )

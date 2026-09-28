@@ -58,7 +58,8 @@ serve(async (req) => {
         continue;
       }
 
-      const newQuantity = (variant.quantity || 0) - item.quantity;
+      const oldQuantity = variant.quantity || 0;
+      const newQuantity = oldQuantity - item.quantity;
 
       const { error: updateError } = await supabase
         .from('product_variant_combinations')
@@ -80,6 +81,25 @@ serve(async (req) => {
 
         if (historyError) {
           console.error('Error inserting into inventory history:', historyError);
+        }
+
+        // Trigger Low Stock or Out-of-Stock alert to seller & staff
+        const isTransitionToLow = oldQuantity > 5 && newQuantity <= 5 && newQuantity > 0;
+        const isTransitionToOut = oldQuantity > 0 && newQuantity <= 0;
+        if (isTransitionToLow || isTransitionToOut) {
+          try {
+            console.log(`[update-product-quantity] Triggering stock alert for variant ${item.product_variant_combination_id} (old: ${oldQuantity}, new: ${newQuantity})`);
+            await supabase.functions.invoke('send-stock-alert', {
+              body: {
+                product_variant_combination_id: item.product_variant_combination_id,
+                old_quantity: oldQuantity,
+                new_quantity: newQuantity,
+                threshold: 5,
+              },
+            });
+          } catch (alertErr) {
+            console.warn('[update-product-quantity] Stock alert invocation notice:', alertErr);
+          }
         }
       }
     }

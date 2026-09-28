@@ -11,6 +11,8 @@ import {
   Modal,
   TextInput,
   ScrollView,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
 import { supabase, getProductsWithDetails, deleteProductMedia, deleteProduct, getCategories } from '../services/supabase';
 import Icon from 'react-native-vector-icons/FontAwesome';
@@ -78,6 +80,10 @@ const ProductScreen = ({ route, navigation }) => {
   const [categoriesList, setCategoriesList] = useState([]);
   const [selectedCategoryFilter, setSelectedCategoryFilter] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
+  const [updatingOrder, setUpdatingOrder] = useState(false);
+  const [customOrderModalVisible, setCustomOrderModalVisible] = useState(false);
+  const [selectedProductForOrder, setSelectedProductForOrder] = useState(null);
+  const [customPositionInput, setCustomPositionInput] = useState('');
 
   const openProductMediaViewer = (selectedProduct, mediaIndex = 0) => {
     const listToSearch = filteredProducts && filteredProducts.length > 0 ? filteredProducts : products;
@@ -215,14 +221,131 @@ const ProductScreen = ({ route, navigation }) => {
       const data = await getProductsWithDetails(currentUserId); // Use currentUserId
       console.log('ProductScreen: Data received from getProductsWithDetails:', data);
       if (data) {
-        setProducts(data);
-        console.log('ProductScreen: products state after setProducts:', data);
+        const sorted = (data || []).slice().sort((a, b) => {
+          const oA = (a.display_order !== undefined && a.display_order !== null) ? a.display_order : 999999;
+          const oB = (b.display_order !== undefined && b.display_order !== null) ? b.display_order : 999999;
+          return oA - oB;
+        });
+        setProducts(sorted);
+        console.log('ProductScreen: products state after setProducts:', sorted);
       }
     } catch (error) {
       console.error("ProductScreen: Error in fetching products:", error.message);
       showAlert("Error", "An unexpected error occurred while fetching data.");
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleMoveProduct = async (filteredIndex, direction) => {
+    if (updatingOrder) return;
+    const targetFilteredIndex = direction === 'up' ? filteredIndex - 1 : filteredIndex + 1;
+    if (targetFilteredIndex < 0 || targetFilteredIndex >= filteredProducts.length) return;
+
+    const currentItem = filteredProducts[filteredIndex];
+    const targetItem = filteredProducts[targetFilteredIndex];
+    if (!currentItem || !targetItem) return;
+
+    const masterIdxCurrent = products.findIndex((p) => String(p.id) === String(currentItem.id));
+    const masterIdxTarget = products.findIndex((p) => String(p.id) === String(targetItem.id));
+    if (masterIdxCurrent === -1 || masterIdxTarget === -1) return;
+
+    const newProducts = [...products];
+    const [moved] = newProducts.splice(masterIdxCurrent, 1);
+    newProducts.splice(masterIdxTarget, 0, moved);
+
+    const updatedProducts = newProducts.map((p, idx) => ({
+      ...p,
+      display_order: idx + 1,
+    }));
+
+    const changedProducts = updatedProducts.filter((p) => {
+      const orig = products.find((op) => String(op.id) === String(p.id));
+      return !orig || orig.display_order !== p.display_order;
+    });
+
+    setProducts(updatedProducts);
+
+    if (changedProducts.length === 0) return;
+
+    setUpdatingOrder(true);
+    try {
+      await Promise.all(
+        changedProducts.map((p) =>
+          supabase
+            .from('products')
+            .update({ display_order: p.display_order })
+            .eq('id', p.id)
+        )
+      );
+    } catch (err) {
+      console.error('Failed to update product display order:', err);
+      showAlert('Error', 'Failed to save product order.');
+      fetchProducts(userId);
+    } finally {
+      setUpdatingOrder(false);
+    }
+  };
+
+  const handleOpenCustomOrderModal = (item) => {
+    setSelectedProductForOrder(item);
+    const currPos = item.display_order !== undefined && item.display_order !== null
+      ? String(item.display_order)
+      : String(products.findIndex((p) => String(p.id) === String(item.id)) + 1);
+    setCustomPositionInput(currPos);
+    setCustomOrderModalVisible(true);
+  };
+
+  const handleSetCustomPosition = async (targetPosition) => {
+    if (!selectedProductForOrder) return;
+    const pos = typeof targetPosition === 'number' ? targetPosition : parseInt(customPositionInput, 10);
+    if (isNaN(pos) || pos < 1 || pos > products.length) {
+      showAlert('Invalid Position', `Please enter a valid position between 1 and ${products.length}.`);
+      return;
+    }
+
+    const currentIdx = products.findIndex((p) => String(p.id) === String(selectedProductForOrder.id));
+    const targetIdx = pos - 1;
+    if (currentIdx === -1 || currentIdx === targetIdx) {
+      setCustomOrderModalVisible(false);
+      return;
+    }
+
+    const newProducts = [...products];
+    const [moved] = newProducts.splice(currentIdx, 1);
+    newProducts.splice(targetIdx, 0, moved);
+
+    const updatedProducts = newProducts.map((p, idx) => ({
+      ...p,
+      display_order: idx + 1,
+    }));
+
+    const changedProducts = updatedProducts.filter((p) => {
+      const orig = products.find((op) => String(op.id) === String(p.id));
+      return !orig || orig.display_order !== p.display_order;
+    });
+
+    setProducts(updatedProducts);
+    setCustomOrderModalVisible(false);
+
+    if (changedProducts.length === 0) return;
+
+    setUpdatingOrder(true);
+    try {
+      await Promise.all(
+        changedProducts.map((p) =>
+          supabase
+            .from('products')
+            .update({ display_order: p.display_order })
+            .eq('id', p.id)
+        )
+      );
+    } catch (err) {
+      console.error('Failed to update product position:', err);
+      showAlert('Error', 'Failed to save product position.');
+      fetchProducts(userId);
+    } finally {
+      setUpdatingOrder(false);
     }
   };
 
@@ -391,7 +514,14 @@ const ProductScreen = ({ route, navigation }) => {
         <ActivityIndicator size="large" color="#007AFF" />
       ) : filteredProducts.length > 0 ? (
         <View style={{flex: 1}}>
+          {updatingOrder && (
+            <View style={styles.updatingOrderBanner}>
+              <ActivityIndicator size="small" color="#007AFF" style={{ marginRight: 8 }} />
+              <Text style={styles.updatingOrderText}>Saving product sequence in catalog...</Text>
+            </View>
+          )}
           <View style={styles.tableHeader}>
+            <Text style={[styles.tableHeaderCell, styles.tableHeaderCellSeq]}>Seq</Text>
             <Text style={[styles.tableHeaderCell, styles.tableHeaderCellEdit]}>Edit</Text>
             <Text style={[styles.tableHeaderCell, { flex: 2, textAlign: 'left', paddingLeft: 4 }]}>Product & Catalog</Text>
             <Text style={styles.tableHeaderCell}>Price</Text>
@@ -400,9 +530,44 @@ const ProductScreen = ({ route, navigation }) => {
           </View>
           <FlatList
             data={filteredProducts}
-            renderItem={({ item }) => {
+            renderItem={({ item, index }) => {
+              const pos = products.findIndex((p) => String(p.id) === String(item.id)) + 1;
+              const isFirst = index === 0;
+              const isLast = index === filteredProducts.length - 1;
+
               return (
                 <View style={styles.productRow}>
+                  {/* Sequence Reorder Column */}
+                  <View style={styles.seqCell}>
+                    <TouchableOpacity
+                      disabled={updatingOrder || isFirst}
+                      onPress={() => handleMoveProduct(index, 'up')}
+                      style={[styles.arrowButton, (updatingOrder || isFirst) && styles.arrowButtonDisabled]}
+                      accessibilityLabel={`Move ${item.product_name} up`}
+                      hitSlop={{ top: 5, bottom: 5, left: 5, right: 5 }}
+                    >
+                      <Icon name="chevron-up" size={11} color={isFirst ? '#CBD5E1' : '#007AFF'} />
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                      onPress={() => handleOpenCustomOrderModal(item)}
+                      style={styles.seqBadge}
+                      accessibilityLabel={`Sequence position ${pos}. Tap to change position.`}
+                    >
+                      <Text style={styles.seqBadgeText}>#{pos}</Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                      disabled={updatingOrder || isLast}
+                      onPress={() => handleMoveProduct(index, 'down')}
+                      style={[styles.arrowButton, (updatingOrder || isLast) && styles.arrowButtonDisabled]}
+                      accessibilityLabel={`Move ${item.product_name} down`}
+                      hitSlop={{ top: 5, bottom: 5, left: 5, right: 5 }}
+                    >
+                      <Icon name="chevron-down" size={11} color={isLast ? '#CBD5E1' : '#007AFF'} />
+                    </TouchableOpacity>
+                  </View>
+
                   <TouchableOpacity onPress={() => handleEditProduct(item)} style={styles.editIcon}>
                     <Icon name="edit" size={20} color="#007AFF" />
                   </TouchableOpacity>
@@ -523,6 +688,77 @@ const ProductScreen = ({ route, navigation }) => {
         onClose={() => setShowMediaViewer(false)}
         title={viewerProductTitle || 'Product Media'}
       />
+
+      {/* Custom Sequence / Position Modal */}
+      <Modal
+        visible={customOrderModalVisible}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setCustomOrderModalVisible(false)}
+      >
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          style={styles.modalOverlay}
+        >
+          <View style={styles.orderModalContainer}>
+            <View style={styles.orderModalHeader}>
+              <Icon name="sort-numeric-asc" size={20} color="#007AFF" style={{ marginRight: 8 }} />
+              <Text style={styles.orderModalTitle}>Set Catalog Sequence</Text>
+            </View>
+
+            <Text style={styles.orderModalProductName} numberOfLines={2}>
+              {selectedProductForOrder?.product_name || 'Selected Product'}
+            </Text>
+            <Text style={styles.orderModalHelp}>
+              Current Catalog Position: #{products.findIndex((p) => String(p.id) === String(selectedProductForOrder?.id)) + 1} of {products.length}
+            </Text>
+
+            {/* Quick action buttons */}
+            <View style={styles.quickOrderRow}>
+              <TouchableOpacity
+                style={styles.quickOrderBtn}
+                onPress={() => handleSetCustomPosition(1)}
+              >
+                <Icon name="arrow-up" size={12} color="#007AFF" style={{ marginRight: 4 }} />
+                <Text style={styles.quickOrderBtnText}>Top (#1)</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.quickOrderBtn}
+                onPress={() => handleSetCustomPosition(products.length)}
+              >
+                <Icon name="arrow-down" size={12} color="#007AFF" style={{ marginRight: 4 }} />
+                <Text style={styles.quickOrderBtnText}>Bottom (#{products.length})</Text>
+              </TouchableOpacity>
+            </View>
+
+            <Text style={styles.orderInputLabel}>Or enter custom position (1 - {products.length}):</Text>
+            <View style={styles.orderInputRow}>
+              <TextInput
+                style={styles.orderPositionInput}
+                value={customPositionInput}
+                onChangeText={setCustomPositionInput}
+                keyboardType="number-pad"
+                placeholder="1"
+                maxLength={4}
+                autoFocus={true}
+              />
+              <TouchableOpacity
+                style={styles.orderSaveButton}
+                onPress={() => handleSetCustomPosition()}
+              >
+                <Text style={styles.orderSaveButtonText}>Apply</Text>
+              </TouchableOpacity>
+            </View>
+
+            <TouchableOpacity
+              style={styles.orderCancelButton}
+              onPress={() => setCustomOrderModalVisible(false)}
+            >
+              <Text style={styles.orderCancelButtonText}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
 
       <TouchableOpacity
         style={styles.fab}
@@ -798,6 +1034,168 @@ const styles = StyleSheet.create({
     color: '#15803D',
     fontSize: 9,
     fontWeight: '800',
+  },
+  tableHeaderCellSeq: {
+    width: 44,
+    textAlign: 'center',
+    paddingLeft: 0,
+    paddingRight: 0,
+  },
+  seqCell: {
+    width: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 2,
+  },
+  arrowButton: {
+    padding: 3,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  arrowButtonDisabled: {
+    opacity: 0.25,
+  },
+  seqBadge: {
+    backgroundColor: '#EFF6FF',
+    borderWidth: 1,
+    borderColor: '#BFDBFE',
+    borderRadius: 4,
+    paddingHorizontal: 4,
+    paddingVertical: 2,
+    marginVertical: 1,
+    minWidth: 28,
+    alignItems: 'center',
+  },
+  seqBadgeText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#007AFF',
+  },
+  updatingOrderBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#EFF6FF',
+    borderWidth: 1,
+    borderColor: '#BFDBFE',
+    borderRadius: 6,
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    marginBottom: 8,
+  },
+  updatingOrderText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#007AFF',
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  orderModalContainer: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 14,
+    padding: 20,
+    width: '100%',
+    maxWidth: 380,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
+    elevation: 8,
+  },
+  orderModalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  orderModalTitle: {
+    fontSize: 17,
+    fontWeight: '700',
+    color: '#1E293B',
+  },
+  orderModalProductName: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#334155',
+    marginBottom: 4,
+  },
+  orderModalHelp: {
+    fontSize: 12,
+    color: '#64748B',
+    marginBottom: 16,
+  },
+  quickOrderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: 10,
+    marginBottom: 16,
+  },
+  quickOrderBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#F1F5F9',
+    borderWidth: 1,
+    borderColor: '#CBD5E1',
+    borderRadius: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+  },
+  quickOrderBtnText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#007AFF',
+  },
+  orderInputLabel: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#334155',
+    marginBottom: 8,
+  },
+  orderInputRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginBottom: 16,
+  },
+  orderPositionInput: {
+    flex: 1,
+    height: 44,
+    borderWidth: 1,
+    borderColor: '#CBD5E1',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    fontSize: 16,
+    color: '#1E293B',
+    backgroundColor: '#F8FAFC',
+    textAlign: 'center',
+  },
+  orderSaveButton: {
+    backgroundColor: '#007AFF',
+    borderRadius: 8,
+    paddingHorizontal: 18,
+    height: 44,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  orderSaveButtonText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  orderCancelButton: {
+    paddingVertical: 10,
+    alignItems: 'center',
+  },
+  orderCancelButtonText: {
+    color: '#64748B',
+    fontSize: 14,
+    fontWeight: '600',
   },
 });
 

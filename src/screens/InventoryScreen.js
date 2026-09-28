@@ -344,6 +344,23 @@ const InventoryScreen = ({ route }) => {
         notes: 'Manual adjustment from app',
       });
 
+      // Trigger low stock or out-of-stock alert to seller & staff if crossed threshold
+      const oldStock = selectedItem.quantity || 0;
+      if ((oldStock > 5 && newQuantity <= 5 && newQuantity > 0) || (oldStock > 0 && newQuantity <= 0)) {
+        try {
+          supabase.functions.invoke('send-stock-alert', {
+            body: {
+              product_variant_combination_id: selectedItem.id,
+              old_quantity: oldStock,
+              new_quantity: newQuantity,
+              threshold: 5,
+            },
+          }).catch((err) => console.warn('[InventoryScreen] Stock alert notice:', err));
+        } catch (alertErr) {
+          console.warn('[InventoryScreen] Stock alert exception:', alertErr);
+        }
+      }
+
       Alert.alert('Success', 'Inventory updated successfully!');
       setQuantityChange('');
       fetchInventory(searchQuery);
@@ -500,23 +517,41 @@ const InventoryScreen = ({ route }) => {
             contentContainerStyle={{ flexGrow: 1, paddingBottom: 40 }}
             showsVerticalScrollIndicator={true}
             keyboardShouldPersistTaps="handled"
-            renderItem={({ item }) => (
-              <TouchableOpacity
-                style={[
-                  styles.itemContainer,
-                  selectedItem?.id === item.id && styles.selectedItemContainer,
-                ]}
-                onPress={() => handleSelectItem(item)}
-              >
-                <Text style={styles.itemName}>
-                  {item.products ? item.products.product_name : 'Product'} - {item.combination_string}
-                </Text>
-                <View style={styles.itemMetaRow}>
-                  <Text style={styles.itemQuantity}>Stock: {item.quantity}</Text>
-                  {item.sku ? <Text style={styles.itemSku}>SKU: {item.sku}</Text> : null}
-                </View>
-              </TouchableOpacity>
-            )}
+            renderItem={({ item }) => {
+              const qty = item.quantity !== undefined && item.quantity !== null ? item.quantity : 0;
+              const isOut = qty <= 0;
+              const isLow = qty > 0 && qty <= 5;
+
+              return (
+                <TouchableOpacity
+                  style={[
+                    styles.itemContainer,
+                    selectedItem?.id === item.id && styles.selectedItemContainer,
+                    isOut && styles.itemContainerOut,
+                  ]}
+                  onPress={() => handleSelectItem(item)}
+                >
+                  <Text style={styles.itemName}>
+                    {item.products ? item.products.product_name : 'Product'} - {item.combination_string}
+                  </Text>
+                  <View style={styles.itemMetaRow}>
+                    <Text style={[styles.itemQuantity, isOut ? styles.stockTextOut : isLow ? styles.stockTextLow : null]}>
+                      Stock: {qty}
+                    </Text>
+                    {isOut ? (
+                      <View style={styles.stockBadgeOut}>
+                        <Text style={styles.stockBadgeOutText}>Out of Stock</Text>
+                      </View>
+                    ) : isLow ? (
+                      <View style={styles.stockBadgeLow}>
+                        <Text style={styles.stockBadgeLowText}>Low Stock ({qty})</Text>
+                      </View>
+                    ) : null}
+                    {item.sku ? <Text style={styles.itemSku}>SKU: {item.sku}</Text> : null}
+                  </View>
+                </TouchableOpacity>
+              );
+            }}
             ListEmptyComponent={<Text style={styles.emptyText}>No inventory items found.</Text>}
           />
         </View>
@@ -556,6 +591,17 @@ const InventoryScreen = ({ route }) => {
                     Adjust Quantity for {selectedItem.products?.product_name} - {selectedItem.combination_string}
                   </Text>
                   <Text style={styles.currentStockNotice}>Current Stock: {selectedItem.quantity}</Text>
+                  {selectedItem.quantity <= 0 ? (
+                    <View style={styles.stockAlertBannerOut}>
+                      <Icon name="exclamation-circle" size={13} color="#dc2626" style={{ marginRight: 6 }} />
+                      <Text style={styles.stockAlertBannerOutText}>Out of stock! Automated alert dispatched to seller & staff.</Text>
+                    </View>
+                  ) : selectedItem.quantity <= 5 ? (
+                    <View style={styles.stockAlertBannerLow}>
+                      <Icon name="warning" size={13} color="#d97706" style={{ marginRight: 6 }} />
+                      <Text style={styles.stockAlertBannerLowText}>Low Stock Alert: Only {selectedItem.quantity} unit(s) remaining.</Text>
+                    </View>
+                  ) : null}
                   <TextInput
                     style={styles.input}
                     placeholder="Quantity Change (e.g. +10 or -5)"
@@ -574,6 +620,17 @@ const InventoryScreen = ({ route }) => {
                     Restock {selectedItem.products?.product_name} - {selectedItem.combination_string}
                   </Text>
                   <Text style={styles.currentStockNotice}>Current Stock: {selectedItem.quantity}</Text>
+                  {selectedItem.quantity <= 0 ? (
+                    <View style={styles.stockAlertBannerOut}>
+                      <Icon name="exclamation-circle" size={13} color="#dc2626" style={{ marginRight: 6 }} />
+                      <Text style={styles.stockAlertBannerOutText}>Out of stock! Automated alert dispatched to seller & staff.</Text>
+                    </View>
+                  ) : selectedItem.quantity <= 5 ? (
+                    <View style={styles.stockAlertBannerLow}>
+                      <Icon name="warning" size={13} color="#d97706" style={{ marginRight: 6 }} />
+                      <Text style={styles.stockAlertBannerLowText}>Low Stock Alert: Only {selectedItem.quantity} unit(s) remaining.</Text>
+                    </View>
+                  ) : null}
                   <TextInput
                     style={styles.input}
                     placeholder="New Total Restock Quantity"
@@ -1300,6 +1357,83 @@ const styles = StyleSheet.create({
     color: '#007AFF',
     fontSize: 13,
     fontWeight: '700',
+  },
+  itemContainerOut: {
+    borderLeftWidth: 4,
+    borderLeftColor: '#dc2626',
+    backgroundColor: '#fff5f5',
+  },
+  stockTextOut: {
+    color: '#dc2626',
+    fontWeight: '700',
+  },
+  stockTextLow: {
+    color: '#d97706',
+    fontWeight: '700',
+  },
+  stockBadgeOut: {
+    backgroundColor: '#fee2e2',
+    borderWidth: 0.5,
+    borderColor: '#fca5a5',
+    borderRadius: 4,
+    paddingHorizontal: 5,
+    paddingVertical: 1,
+    marginLeft: 6,
+  },
+  stockBadgeOutText: {
+    color: '#b91c1c',
+    fontSize: 10,
+    fontWeight: '700',
+  },
+  stockBadgeLow: {
+    backgroundColor: '#fef3c7',
+    borderWidth: 0.5,
+    borderColor: '#fcd34d',
+    borderRadius: 4,
+    paddingHorizontal: 5,
+    paddingVertical: 1,
+    marginLeft: 6,
+  },
+  stockBadgeLowText: {
+    color: '#b45309',
+    fontSize: 10,
+    fontWeight: '700',
+  },
+  stockAlertBannerOut: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#fee2e2',
+    borderWidth: 1,
+    borderColor: '#fca5a5',
+    borderRadius: 6,
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    marginTop: 6,
+    marginBottom: 10,
+  },
+  stockAlertBannerOutText: {
+    color: '#b91c1c',
+    fontSize: 12,
+    fontWeight: '600',
+    flex: 1,
+  },
+  stockAlertBannerLow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#fef3c7',
+    borderWidth: 1,
+    borderColor: '#fcd34d',
+    borderRadius: 6,
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    marginTop: 6,
+    marginBottom: 10,
+  },
+  stockAlertBannerLowText: {
+    color: '#b45309',
+    fontSize: 12,
+    fontWeight: '600',
+    flex: 1,
   },
 });
 

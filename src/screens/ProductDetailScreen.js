@@ -180,6 +180,16 @@ const ProductDetailScreen = ({ navigation, route }) => {
       return;
     }
 
+    const stock = combination.quantity !== undefined && combination.quantity !== null ? combination.quantity : 100;
+    if (stock <= 0) {
+      Alert.alert('Out of Stock', 'Sorry, this product variant is out of stock.');
+      return;
+    }
+    if (quantity > stock) {
+      Alert.alert('Stock Limit', `Sorry, you can only add up to ${stock} items.`);
+      return;
+    }
+
     const { data: { user: currentUser } } = await supabase.auth.getUser();
 
     if (!currentUser) {
@@ -389,6 +399,15 @@ const ProductDetailScreen = ({ navigation, route }) => {
                   </Text>
                 </View>
               )}
+              {(() => {
+                const stock = combo?.quantity !== undefined && combo?.quantity !== null ? combo.quantity : 100;
+                const isOutOfStock = stock <= 0;
+                return (
+                  <Text style={[styles.stockText, isOutOfStock && styles.stockOutText]}>
+                    {isOutOfStock ? '• Out of Stock' : `• In Stock: ${stock} ${product.unit || 'units'}`}
+                  </Text>
+                );
+              })()}
             </View>
           );
         })()}
@@ -457,10 +476,23 @@ const ProductDetailScreen = ({ navigation, route }) => {
           </View>
         </View>
 
-        <TouchableOpacity style={styles.addToCartButton} onPress={handleAddToCart}>
-          <Icon name="shopping-cart" size={20} color="#fff" style={{ marginRight: 10 }} />
-          <Text style={styles.addToCartButtonText}>Add to Cart</Text>
-        </TouchableOpacity>
+        {(() => {
+          const combo = getVariantCombination();
+          const stock = combo?.quantity !== undefined && combo?.quantity !== null ? combo.quantity : 100;
+          const isOutOfStock = stock <= 0;
+          return (
+            <TouchableOpacity 
+              style={[styles.addToCartButton, isOutOfStock && styles.addToCartButtonDisabled]} 
+              onPress={handleAddToCart}
+              disabled={isOutOfStock}
+            >
+              <Icon name="shopping-cart" size={20} color="#fff" style={{ marginRight: 10 }} />
+              <Text style={[styles.addToCartButtonText, isOutOfStock && styles.addToCartButtonTextDisabled]}>
+                {isOutOfStock ? 'Out of Stock' : 'Add to Cart'}
+              </Text>
+            </TouchableOpacity>
+          );
+        })()}
       </View>
 
       <FullScreenImageViewer
@@ -684,6 +716,15 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: '#333',
   },
+  stockText: {
+    fontSize: 13,
+    color: '#16a34a',
+    fontWeight: '600',
+    marginTop: 6,
+  },
+  stockOutText: {
+    color: '#dc2626',
+  },
   addToCartButton: {
     backgroundColor: '#43A047',
     flexDirection: 'row',
@@ -694,10 +735,17 @@ const styles = StyleSheet.create({
     marginTop: 10,
     elevation: 3,
   },
+  addToCartButtonDisabled: {
+    backgroundColor: '#94a3b8',
+    opacity: 0.7,
+  },
   addToCartButtonText: {
     color: '#fff',
     fontSize: 18,
     fontWeight: 'bold',
+  },
+  addToCartButtonTextDisabled: {
+    color: '#f8fafc',
   },
   topFloatingBar: {
     position: 'absolute',
